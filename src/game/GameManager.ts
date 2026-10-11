@@ -18,6 +18,10 @@ export class GameManager {
     this.onStateUpdate = onStateUpdate;
   }
 
+  public setOnStateUpdate(fn: (state: Partial<GameState>) => void) {
+    this.onStateUpdate = fn;
+  }
+
   public async init(canvas: HTMLCanvasElement, initialState: GameState, upgrades: Upgrade[]) {
     this.renderer = new Renderer(canvas);
     await this.renderer.init(canvas);

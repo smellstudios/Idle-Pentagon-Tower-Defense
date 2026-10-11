@@ -322,7 +322,7 @@ export const EncyclopediaModal: React.FC<Props> = ({ isOpen, onClose, gameState,
 
                         // Calculate spawn text
                         let spawnStr = '0%';
-                        const isBossWave = activeWave % 5 === 0;
+                        const isBossWave = activeWave % 10 === 0;
                         if (enemy.id === 'boss') {
                           spawnStr = isBossWave ? 'GUARANTEED (100%)' : '0%';
                         } else {

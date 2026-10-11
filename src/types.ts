@@ -23,6 +23,9 @@ export interface Entity {
   isPiercing?: boolean;
   orbitAngle?: number;
   orbitRadius?: number;
+  spiralInwardOffset?: number;
+  bossArchetype?: any;
+  bossAbilityTimer?: number;
   orbitDirection?: number;
   orbitSpeed?: number;
   shootRange?: number;
@@ -96,6 +99,11 @@ export interface ActiveBossInfo {
   maxHp: number;
   name: string;
   wave: number;
+  title?: string;
+  archetype?: string;
+  shieldHp?: number;
+  maxShieldHp?: number;
+  colorHex?: string;
 }
 
 export interface CardDef {

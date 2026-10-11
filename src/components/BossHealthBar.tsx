@@ -106,7 +106,7 @@ export const BossHealthBar: React.FC<Props> = ({ boss, isDead }) => {
 
           {/* Header row: Boss Info & Digital Percentage */}
           <div className="flex items-center justify-between gap-1.5 z-10">
-            {/* Left: Boss Wave Badge */}
+            {/* Left: Boss Name & Title */}
             <div className="flex items-center gap-1.5 min-w-0">
               <div className={`p-1 rounded-lg border shrink-0 transition-colors ${
                 isExecutePhase
@@ -117,9 +117,19 @@ export const BossHealthBar: React.FC<Props> = ({ boss, isDead }) => {
               </div>
 
               <div className="flex flex-col min-w-0">
-                <span className="text-[10px] sm:text-[11px] font-mono font-black text-purple-100 uppercase tracking-wider whitespace-nowrap drop-shadow-[0_0_8px_rgba(168,85,247,0.6)]">
-                  WAVE {boss.wave} BOSS
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] sm:text-[11px] font-mono font-black text-white uppercase tracking-wider whitespace-nowrap drop-shadow-[0_0_8px_rgba(168,85,247,0.6)]">
+                    {boss.name || `WAVE ${boss.wave} BOSS`}
+                  </span>
+                  <span className="text-[7.5px] px-1 py-0.2 rounded bg-purple-950/80 border border-purple-500/40 text-purple-300 font-mono font-bold">
+                    W{boss.wave}
+                  </span>
+                </div>
+                {boss.title && (
+                  <span className="text-[8px] sm:text-[8.5px] font-mono text-zinc-400 truncate">
+                    {boss.title}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -180,6 +190,25 @@ export const BossHealthBar: React.FC<Props> = ({ boss, isDead }) => {
             </motion.div>
           </div>
 
+          {/* Harmonic Energy Shield Bar (Strictly Wave 50+ only) */}
+          {boss.maxShieldHp !== undefined && boss.maxShieldHp > 0 && (
+            <div className="w-full flex flex-col gap-0.5 z-10">
+              <div className="flex items-center justify-between text-[7.5px] font-mono text-cyan-300">
+                <span className="flex items-center gap-0.5">
+                  <ShieldAlert className="w-2 h-2 text-cyan-400" />
+                  <span>HARMONIC SHIELD</span>
+                </span>
+                <span>{Math.max(0, Math.round(boss.shieldHp || 0))}/{boss.maxShieldHp}</span>
+              </div>
+              <div className="w-full h-1 bg-black/90 rounded-full border border-cyan-500/40 p-[1px] overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-cyan-500 to-sky-300 rounded-full transition-all duration-150"
+                  style={{ width: `${Math.max(0, Math.min(100, ((boss.shieldHp || 0) / boss.maxShieldHp) * 100))}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Footer row: Exact numerical HP & Status Warning */}
           <div className="flex items-center justify-between text-[8px] sm:text-[9px] font-mono z-10 px-0.5">
             <span className="text-zinc-400 font-semibold tabular-nums shrink-0 whitespace-nowrap">
@@ -191,6 +220,11 @@ export const BossHealthBar: React.FC<Props> = ({ boss, isDead }) => {
               <span className="text-rose-400 font-black uppercase tracking-wider flex items-center gap-1 shrink-0 animate-pulse">
                 <Zap className="w-2.5 h-2.5 text-rose-400" />
                 EXECUTE PHASE
+              </span>
+            ) : boss.maxShieldHp && boss.maxShieldHp > 0 && (boss.shieldHp || 0) > 0 ? (
+              <span className="text-cyan-400 font-bold uppercase tracking-wider flex items-center gap-0.5 shrink-0">
+                <ShieldAlert className="w-2.5 h-2.5 text-cyan-400" />
+                SHIELD ACTIVE
               </span>
             ) : (
               <span className="text-fuchsia-400/90 font-bold uppercase tracking-wider flex items-center gap-0.5 shrink-0">

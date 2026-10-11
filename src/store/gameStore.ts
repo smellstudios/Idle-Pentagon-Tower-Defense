@@ -1382,7 +1382,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     
     // Performance bonuses from run:
     const enemiesBonusShards = Math.floor((summary.enemiesDefeated || 0) / 10); // +1 shard per 10 hostiles neutralized
-    const bossesBonusShards = Math.floor(summary.waveReached / 5) * 6; // +6 shards per boss neutralized
+    const bossesBonusShards = Math.floor(summary.waveReached / 10) * 15; // +15 shards per boss neutralized (bosses spawn every 10 waves)
     const recordBonusShards = summary.newRecord ? 15 : 0; // +15 shards record breaker milestone
     const subtotalRaw = rawShards + enemiesBonusShards + bossesBonusShards + recordBonusShards;
     const shardsEarned = Math.round(subtotalRaw * techBonuses.cosmicShardGainMultiplier);
@@ -1517,8 +1517,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const cardHpBonus = state.equippedCardIds?.includes('card_health_plating') ? 1.4 : 1.0;
     const baseHealth = Math.round(((healthUpg?.baseValue || 15) + permHpBonus) * cardHpBonus * techBonuses.healthMultiplier);
     const startWave = Math.max(1, 1 + techBonuses.startingWaveBonus);
-
-    const newShards = state.cosmicShards + totalShards;
+    // Retain shards balance (already awarded in handlePlayerDeath, including meta spending)
+    const newShards = state.cosmicShards;
     const newAscensionCount = (state.ascensionCount || 0) + 1;
 
     set({
@@ -1545,7 +1545,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       stats: {
         ...state.stats,
         totalAscensions: (state.stats?.totalAscensions || 0) + 1,
-        lifetimeCosmicShards: (state.stats?.lifetimeCosmicShards || 0) + totalShards,
         highestWavePerTier: {
           ...(state.stats?.highestWavePerTier || {}),
           [state.tier]: Math.max(state.stats?.highestWavePerTier?.[state.tier] || 0, waveReached),

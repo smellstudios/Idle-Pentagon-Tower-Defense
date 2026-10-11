@@ -16,13 +16,11 @@ import {
   ChevronUp,
   Minus, 
   Plus, 
-  Sparkles,
-  FastForward,
-  Pause
+  Sparkles
 } from 'lucide-react';
 import { UpgradeTile } from './UpgradeTile';
 import { soundEngine } from '../game/sound';
-import { calculatePlayerCombatStats, getMaxGameSpeed, getAvailableGameSpeeds } from '../game/constants';
+import { calculatePlayerCombatStats } from '../game/constants';
 import { formatCurrency } from '../utils/format';
 
 interface Props {
@@ -30,7 +28,6 @@ interface Props {
   gameState: GameState;
   onBuy: (id: string) => void;
   onStateUpdate: (partial: Partial<GameState>) => void;
-  onSetGameSpeed?: (speed: number) => void;
   calculateUpgradeCost: (upgrade: Upgrade, level: number, amount: number) => number;
   isOpen?: boolean;
   onToggleOpen?: (explicitVal?: boolean) => void;
@@ -43,7 +40,6 @@ export const UpgradePanel: React.FC<Props> = ({
   gameState, 
   onBuy, 
   onStateUpdate,
-  onSetGameSpeed,
   calculateUpgradeCost,
   isOpen: externalIsOpen,
   onToggleOpen
@@ -167,31 +163,6 @@ export const UpgradePanel: React.FC<Props> = ({
   const currentHp = gameState.isDead ? 0 : Math.max(0, Math.min(maxHp, gameState.playerHp ?? maxHp));
   const hpRatio = Math.max(0, Math.min(1, currentHp / maxHp));
 
-  // Game Speed stepped controls with lab limits (0x paused, 0.5x slow, 1.0x normal, up to 3.0x limit)
-  const currentSpeed = gameState.gameSpeed !== undefined ? gameState.gameSpeed : 1.0;
-  const maxSpeed = getMaxGameSpeed(gameState.labResearchLevels);
-  const isPaused = currentSpeed === 0;
-  const isAccelerated = currentSpeed > 1.0;
-  const isAtMaxSpeed = currentSpeed >= maxSpeed - 0.05;
-  const isAtMinSpeed = currentSpeed <= 0.05;
-
-  const handleSpeedChange = (delta: -1 | 1) => {
-    soundEngine.playTabSwitch();
-    const available = getAvailableGameSpeeds(gameState.labResearchLevels);
-    const currentIndex = available.findIndex(s => Math.abs(s - currentSpeed) < 0.05);
-    let newIndex = currentIndex;
-    if (currentIndex === -1) {
-      newIndex = delta > 0 ? 1 : 0;
-    } else {
-      newIndex = Math.max(0, Math.min(available.length - 1, currentIndex + delta));
-    }
-    const newSpeed = available[newIndex];
-    if (onSetGameSpeed) {
-      onSetGameSpeed(newSpeed);
-    } else {
-      onStateUpdate({ gameSpeed: newSpeed });
-    }
-  };
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-30 flex flex-col items-center pointer-events-none pb-[env(safe-area-inset-bottom,0px)]">
@@ -246,66 +217,8 @@ export const UpgradePanel: React.FC<Props> = ({
             )}
           </button>
 
-          {/* Right Controls: Speed Stepper & Bulk Buy Mode */}
+          {/* Right Controls: Bulk Buy Mode */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Speed Stepper */}
-            <div 
-              className={`flex items-center rounded-md px-1 py-0.5 text-[9px] font-mono font-bold transition-all ${
-                isPaused
-                  ? 'bg-rose-950/70 border border-rose-500/50 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)] animate-pulse'
-                  : isAccelerated
-                  ? 'bg-amber-950/70 border border-amber-400/50 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.25)]'
-                  : currentSpeed === 0.5
-                  ? 'bg-sky-950/70 border border-sky-400/50 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)]'
-                  : 'bg-cyan-950/40 border border-cyan-500/25 text-cyan-300'
-              }`}
-              title={
-                isPaused
-                  ? "Simulation Paused (0x). Click [+] to resume."
-                  : isAccelerated
-                  ? `Time Accelerated (${currentSpeed.toFixed(1)}x). Max unlocked: ${maxSpeed.toFixed(1)}x${maxSpeed < 3.0 ? ' (Upgrade in Lab for +0.5x up to 3.0x)' : ' (Max 3.0x reached)'}`
-                  : currentSpeed === 0.5
-                  ? "Slow-Motion (0.5x). Click [+] to return to 1.0x."
-                  : `Simulation speed (1.0x Normal). Max unlocked: ${maxSpeed.toFixed(1)}x`
-              }
-            >
-              <button
-                type="button"
-                onClick={() => handleSpeedChange(-1)}
-                disabled={isAtMinSpeed}
-                className={`p-0.5 transition-transform cursor-pointer ${
-                  isAtMinSpeed ? 'opacity-30 cursor-not-allowed' : 'hover:text-white active:scale-90'
-                }`}
-                title={isAtMinSpeed ? "Minimum speed reached (0x Paused)" : "Decrease Speed (-0.5x)"}
-              >
-                <Minus className="w-2.5 h-2.5" />
-              </button>
-              <span className="px-1 text-center min-w-[20px] tabular-nums flex items-center justify-center gap-0.5">
-                {isPaused && <Pause className="w-2.5 h-2.5 text-rose-400 shrink-0" />}
-                {isAccelerated && <FastForward className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
-                <span>{currentSpeed.toFixed(1)}x</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => handleSpeedChange(1)}
-                disabled={isAtMaxSpeed}
-                className={`p-0.5 transition-transform cursor-pointer ${
-                  isAtMaxSpeed ? 'opacity-30 cursor-not-allowed' : 'hover:text-white active:scale-90'
-                }`}
-                title={
-                  isAtMaxSpeed
-                    ? maxSpeed < 3.0
-                      ? `Max speed for current tier (${maxSpeed.toFixed(1)}x). Upgrade Maximum Game Speed in Lab (+0.5x, up to 3.0x)!`
-                      : 'Max speed limit (3.0x) reached'
-                    : isPaused
-                    ? 'Resume Game (+0.5x)'
-                    : 'Increase Speed (+0.5x)'
-                }
-              >
-                <Plus className="w-2.5 h-2.5" />
-              </button>
-            </div>
-
             {/* Bulk Buy Toggle: 1x / 10x / Max */}
             <div className="flex bg-zinc-900/90 p-0.5 rounded-md border border-white/10">
               {(['x1', 'x10', 'xMax'] as const).map(mode => (

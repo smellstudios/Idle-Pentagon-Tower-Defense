@@ -53,7 +53,7 @@ export const ProgressionCurvesModal: React.FC<Props> = ({ isOpen, onClose }) => 
         const w3 = w - 50;
         baseCrate = 340 + w3 * 16.0 + Math.pow(w3, 1.85) * 0.95;
       }
-      const isBoss = w % 5 === 0;
+      const isBoss = w % 10 === 0;
       const crate = baseCrate * (isBoss ? 1.4 : 1.0);
 
       // Enemy kill drops
@@ -162,7 +162,7 @@ export const ProgressionCurvesModal: React.FC<Props> = ({ isOpen, onClose }) => 
 
   // TTK Path strings
   const regularTtkPath = curveData.map((d, i) => `${i === 0 ? 'M' : 'L'} ${toX(d.wave).toFixed(1)} ${toY_TTK(d.regularTtk).toFixed(1)}`).join(' ');
-  const bossTtkPath = curveData.filter(d => d.wave % 5 === 0).map((d, i) => `${i === 0 ? 'M' : 'L'} ${toX(d.wave).toFixed(1)} ${toY_TTK(d.bossTtk).toFixed(1)}`).join(' ');
+  const bossTtkPath = curveData.filter(d => d.wave % 10 === 0).map((d, i) => `${i === 0 ? 'M' : 'L'} ${toX(d.wave).toFixed(1)} ${toY_TTK(d.bossTtk).toFixed(1)}`).join(' ');
 
   const desmosExpressions = `// --- CALAMITY WAVES: PROGRESSION REWORK DESMOS MODEL ---
 // Four-stage Continuous Exponential Scaling (Option B Smooth Transition Fix):

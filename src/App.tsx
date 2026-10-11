@@ -24,6 +24,7 @@ import { MilestonesModal } from './components/MilestonesModal';
 import { MissionsMilestonesToasts } from './components/MissionsMilestonesToasts';
 import { ProgressionCurvesModal } from './components/ProgressionCurvesModal';
 import { useGame } from './hooks/useGame';
+import { useGameStore } from './store/gameStore';
 import { GameManager } from './game/GameManager';
 import { soundEngine } from './game/sound';
 import { bgmEngine } from './game/bgm';
@@ -207,30 +208,45 @@ export default function App() {
     setGameState(prev => ({ ...prev, latestAcquiredDrop: null }));
   }, [setGameState]);
 
+  const isDeathHandledThisRunRef = useRef(false);
+
   const handleStateUpdate = useCallback((partial: Partial<typeof gameState>) => {
     // Check for death trigger
-    if (partial.isDead && !gameState.isDead) {
+    if (partial.isDead && !isDeathHandledThisRunRef.current) {
+      isDeathHandledThisRunRef.current = true;
       soundEngine.playDeath();
       soundEngine.startAmbientMenu();
-      const waveReached = partial.wave ?? gameState.wave ?? 1;
-      const isNewRecord = waveReached > (gameState.highestWaveEver || 0);
+      const currentStore = useGameStore.getState();
+      const waveReached = partial.wave ?? currentStore.wave ?? 1;
+      const isNewRecord = waveReached > (currentStore.highestWaveEver || 0);
       handlePlayerDeath({
         waveReached,
         enemiesDefeated: gameManagerRef.current?.getEnemiesDefeated() || 0,
-        totalShardsEarned: calculateAscensionShards(waveReached, 1.0, gameState.tier || 1),
-        highestWaveEver: Math.max(gameState.highestWaveEver || 0, waveReached),
+        totalShardsEarned: calculateAscensionShards(waveReached, 1.0, currentStore.tier || 1),
+        highestWaveEver: Math.max(currentStore.highestWaveEver || 0, waveReached),
         newRecord: isNewRecord,
-        ascensionCount: (gameState.ascensionCount || 0) + 1,
+        ascensionCount: (currentStore.ascensionCount || 0) + 1,
       });
+      setGameState({ ...partial, isDead: true, playerHp: 0, isWaveActive: false });
       return;
     }
 
-    if (partial.isDead === false && gameState.isDead) {
-      soundEngine.startAmbientBattle();
+    if (partial.isDead === false) {
+      isDeathHandledThisRunRef.current = false;
+      const currentStore = useGameStore.getState();
+      if (currentStore.isDead) {
+        soundEngine.startAmbientBattle();
+      }
     }
 
     setGameState(partial);
-  }, [gameState.isDead, gameState.wave, gameState.tier, gameState.highestWaveEver, gameState.ascensionCount, handlePlayerDeath, setGameState, gameManagerRef]);
+  }, [handlePlayerDeath, setGameState, gameManagerRef]);
+
+  useEffect(() => {
+    if (gameManagerRef.current) {
+      gameManagerRef.current.setOnStateUpdate(handleStateUpdate);
+    }
+  }, [handleStateUpdate]);
 
   useEffect(() => {
     if (isInitStarted.current) return;
@@ -345,9 +361,9 @@ export default function App() {
         isUpgradesOpen={isUpgradePanelOpen}
       />
 
-      {/* Boss Health Bar (Top Center - positioned cleanly below Header) */}
+      {/* Boss Health Bar (Top Center - Full Row Dedicated to Boss) */}
       {!gameState.isDead && gameState.activeBoss && (
-        <div className="absolute top-[50px] sm:top-[54px] left-0 right-0 z-20 px-3 pointer-events-none flex justify-center animate-fade-in">
+        <div className="absolute top-[48px] sm:top-[52px] left-0 right-0 px-2 sm:px-4 z-20 pointer-events-none flex justify-center animate-fade-in">
           <BossHealthBar boss={gameState.activeBoss} isDead={gameState.isDead} />
         </div>
       )}
@@ -373,14 +389,16 @@ export default function App() {
 
       {/* Threat Intel Scanner (Upper-Right HUD - only during regular waves, positioned cleanly below Header) */}
       {!gameState.isDead && !gameState.activeBoss && (
-        <div className="absolute top-[66px] sm:top-[70px] right-2.5 sm:right-3 z-20 pointer-events-auto animate-fade-in">
+        <div className="absolute top-[56px] sm:top-[60px] right-2.5 sm:right-3 z-20 pointer-events-auto animate-fade-in">
           <EnemyStatsBox gameState={gameState} upgrades={upgrades} />
         </div>
       )}
 
       {/* Speed Control & Acceleration Indicator (Main Gameplay HUD: [-] 1.0x [+]) */}
       {!gameState.isDead && (
-        <div className="absolute top-[66px] sm:top-[70px] left-2.5 sm:left-3 z-20 pointer-events-auto animate-fade-in">
+        <div className={`absolute left-2.5 sm:left-3 z-20 pointer-events-auto transition-all duration-300 animate-fade-in ${
+          gameState.activeBoss ? 'top-[112px] sm:top-[116px]' : 'top-[56px] sm:top-[60px]'
+        }`}>
           <SpeedIndicatorHUD
             gameSpeed={gameState.gameSpeed !== undefined ? gameState.gameSpeed : 1.0}
             labResearchLevels={gameState.labResearchLevels}
@@ -426,7 +444,6 @@ export default function App() {
           gameState={gameState} 
           onBuy={buyUpgrade} 
           onStateUpdate={handleStateUpdate}
-          onSetGameSpeed={setGameSpeed}
           isOpen={isUpgradePanelOpen}
           onToggleOpen={handleToggleUpgradePanel}
           calculateUpgradeCost={(upg, lvl, amt) => {

@@ -20,6 +20,7 @@ import {
   rollBossRareDrop,
   calculatePlayerCombatStats,
   PlayerCombatStats,
+  getBossArchetype,
 } from './constants';
 import { PopupManager } from './popups';
 import { soundEngine } from './sound';
@@ -29,6 +30,7 @@ export class Simulation {
   private renderer: Renderer;
   private state: GameState;
   private upgrades: Upgrade[];
+  private isHandlingDeath: boolean = false;
 
   private enemies: Entity[] = [];
   private projectiles: Entity[] = [];
@@ -295,10 +297,13 @@ export class Simulation {
     const targetsInRange: Entity[] = [];
 
     for (const enemy of this.enemies) {
+      if (enemy.hp <= 0) continue;
       const dx = enemy.x - GAME_WIDTH / 2;
       const dy = enemy.y - GAME_HEIGHT / 2;
       const distSq = dx * dx + dy * dy;
-      if (distSq <= r2) {
+      // Normal range check or orbiter engagement check
+      const isTargetable = distSq <= r2 || (enemy.type === 'circle' && enemy.isOrbiting && distSq <= (effectiveRadius + 12) * (effectiveRadius + 12));
+      if (isTargetable) {
         inRangeCount++;
         (enemy as any)._distSq = distSq;
         targetsInRange.push(enemy);
@@ -475,7 +480,13 @@ export class Simulation {
           this.spawnEnemy(true);
           this.waveEnemiesSpawned++;
           this.spawnTimer = 0;
-          this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, '⚠️ BOSS ENCOUNTER ⚠️', 0xef4444);
+          const arch = getBossArchetype(this.state.wave);
+          this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 86, `⚠️ ${arch.name.toUpperCase()} ⚠️`, arch.colorInt);
+          this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 68, arch.title.toUpperCase(), 0xffffff);
+          if (this.state.wave >= 50) {
+            this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, '🛡️ HARMONIC OVERSHIELD ONLINE', 0x38bdf8);
+          }
+          soundEngine.playBossSpawn();
         } else if (this.waveEnemiesSpawned < this.waveEnemiesTotal && this.spawnTimer > baseSpawnInterval * 1.25) {
           this.spawnEnemy(false);
           this.waveEnemiesSpawned++;
@@ -587,8 +598,11 @@ export class Simulation {
           if (enemy.type === 'boss') hasBossContact = true;
 
           // Per-enemy Defense % and Defense Absolute mitigation (Rule 5)
-          const mitigatedDps = rawDps * (1 - playerStats.defensePercent);
-          const netEnemyDamagePerSec = Math.max(0, mitigatedDps - playerStats.defenseAbsolute);
+          const cappedDefPercent = Math.min(0.90, Math.max(0, playerStats.defensePercent || 0));
+          const mitigatedDps = rawDps * (1 - cappedDefPercent);
+          // Anti-immortality safeguard: Guaranteed minimum 8% raw contact damage floor
+          const minDpsFloor = rawDps * 0.08;
+          const netEnemyDamagePerSec = Math.max(minDpsFloor, mitigatedDps - (playerStats.defenseAbsolute || 0));
           totalNetContactDamage += netEnemyDamagePerSec * tickFraction;
 
           // THORN DAMAGE CALCULATION:
@@ -631,6 +645,8 @@ export class Simulation {
         );
 
         if (this.state.playerHp <= 0) {
+          if (this.isHandlingDeath) return;
+          this.isHandlingDeath = true;
           this.state.isDead = true;
           this.state.playerHp = 0;
           this.state.isWaveActive = false;
@@ -639,6 +655,8 @@ export class Simulation {
           stateUpdate.isWaveActive = false;
           stateUpdate.wave = this.state.wave;
           stateUpdate.tier = this.state.tier;
+          stateUpdate.enemiesRemaining = 0;
+          stateUpdate.activeBoss = null;
           this.clearAllEntities();
           this.damageTickTimer = 0;
           this.pendingStateUpdate = {};
@@ -650,7 +668,7 @@ export class Simulation {
     }
 
     // CONTINUOUS HP REGENERATION: Ticks smoothly every frame regardless of enemy activity or damage
-    if (playerStats.hpRegen > 0 && this.state.playerHp > 0 && this.state.playerHp < playerStats.effectiveMaxHp) {
+    if (playerStats.hpRegen > 0 && this.state.playerHp > 0 && !this.state.isDead && !this.isHandlingDeath && this.state.playerHp < playerStats.effectiveMaxHp) {
       const regenAmount = playerStats.hpRegen * (deltaMs / 1000);
       const newRegenHp = Math.min(playerStats.effectiveMaxHp, this.state.playerHp + regenAmount);
       if (newRegenHp !== this.state.playerHp) {
@@ -662,16 +680,23 @@ export class Simulation {
     // 7. Active Boss Detection & Real-time Health Tracking
     const bossEntity = this.enemies.find(e => e.type === 'boss');
     if (bossEntity && bossEntity.hp > 0) {
+      const arch = (bossEntity as any).bossArchetype || getBossArchetype(this.state.wave);
       if (
         !this.state.activeBoss ||
         this.state.activeBoss.hp !== bossEntity.hp ||
-        this.state.activeBoss.maxHp !== bossEntity.maxHp
+        this.state.activeBoss.maxHp !== bossEntity.maxHp ||
+        this.state.activeBoss.shieldHp !== bossEntity.shieldHp
       ) {
         stateUpdate.activeBoss = {
           hp: Math.max(0, bossEntity.hp),
           maxHp: bossEntity.maxHp,
-          name: `WAVE ${this.state.wave} BOSS`,
+          name: arch.name,
+          title: arch.title,
           wave: this.state.wave,
+          shieldHp: bossEntity.shieldHp,
+          maxShieldHp: bossEntity.maxShieldHp,
+          colorHex: arch.colorHex,
+          archetype: arch.id,
         };
       }
     } else if (this.state.activeBoss !== null) {
@@ -2041,9 +2066,11 @@ export class Simulation {
     let color = 0xef4444;
     let radius = PHYSICS_CONFIG.enemyRadii[type as keyof typeof PHYSICS_CONFIG.enemyRadii] || PHYSICS_CONFIG.enemyRadii.default;
 
+    let bossArchetype: any = null;
     if (type === 'boss') {
-      speed = 0.45;
-      color = 0xa855f7; // Neon purple
+      bossArchetype = getBossArchetype(wave);
+      speed = bossArchetype.speed;
+      color = bossArchetype.colorInt;
       radius = PHYSICS_CONFIG.enemyRadii.boss;
     } else if (type === 'orange_triangle') {
       speed = ENEMY_BASE_STATS.orange_triangle.speed;
@@ -2098,14 +2125,21 @@ export class Simulation {
       isGolden = Math.random() < 0.008; // 0.8% chance
     }
 
-    // 2. Shielded Shapes (Blue bubble & overshield bar, wave >= 6)
+    // 2. Shielded Shapes:
+    // Bosses strictly DO NOT have shields until wave 50!
     let isShielded = false;
     let maxShieldHp: number | undefined = undefined;
     let shieldHp: number | undefined = undefined;
-    if (!isGolden && (wave >= 6 || (type === 'boss' && Math.random() < 0.20))) {
-      if (Math.random() < 0.12 || type === 'boss') {
+    if (type === 'boss') {
+      if (wave >= 50) {
         isShielded = true;
         maxShieldHp = Math.round(hp * 0.45);
+        shieldHp = maxShieldHp;
+      }
+    } else if (!isGolden && wave >= 15) {
+      if (Math.random() < 0.10) {
+        isShielded = true;
+        maxShieldHp = Math.round(hp * 0.40);
         shieldHp = maxShieldHp;
       }
     }
@@ -2125,10 +2159,11 @@ export class Simulation {
     }
 
     // Check pool first to reuse graphics and avoid GC allocation
-    let pool = this.enemyPools.get(type);
+    const poolKey = type === 'boss' ? `boss_${bossArchetype?.id || 'default'}` : type;
+    let pool = this.enemyPools.get(poolKey);
     if (!pool) {
       pool = [];
-      this.enemyPools.set(type, pool);
+      this.enemyPools.set(poolKey, pool);
     }
 
     let enemy = pool.pop();
@@ -2150,7 +2185,10 @@ export class Simulation {
       enemy.blinkTimerMs = type === 'purple_pentagon' ? 2600 + Math.random() * 800 : undefined;
       enemy.isOrbiting = false;
       enemy.orbitAngle = undefined;
-      enemy.orbitRadius = type === 'circle' ? (115 + (Math.random() - 0.5) * 20) : undefined;
+      enemy.orbitRadius = undefined;
+      (enemy as any).spiralInwardOffset = 0;
+      (enemy as any).bossArchetype = bossArchetype;
+      (enemy as any).bossAbilityTimer = 0;
       enemy.orbitDirection = type === 'circle' ? (Math.random() < 0.5 ? 1 : -1) : undefined;
       enemy.orbitSpeed = type === 'circle' ? (0.013 + Math.random() * 0.003) : undefined;
       enemy.shootRange = type === 'circle' ? 210 : undefined;
@@ -2186,20 +2224,53 @@ export class Simulation {
     const graphics = new Graphics();
 
     if (type === 'boss') {
-      const innerRadius = 8;
-      const outerRadius = 15;
-      const points: { x: number; y: number }[] = [];
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 === 0 ? outerRadius : innerRadius;
-        const a = (i / 10) * Math.PI * 2;
-        points.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
-      }
-      graphics.poly(points).fill(color).stroke({ color: 0xffffff, width: 2, alpha: 0.6 });
-      // Golden Super Armor Shield Crown Outer Ring
-      graphics.circle(0, 0, 18).stroke({ color: 0xfacc15, width: 2.5, alpha: 0.9 });
-      for (let i = 0; i < 3; i++) {
-        const ca = (i / 3) * Math.PI * 2;
-        graphics.circle(Math.cos(ca) * 18, Math.sin(ca) * 18, 2.5).fill(0xfacc15);
+      const arch = bossArchetype || getBossArchetype(wave);
+      if (arch.id === 'apex_decagon') {
+        // Apex Decagon (10-sided fortress titan with heavy armor rim)
+        const pts: { x: number; y: number }[] = [];
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * 16, y: Math.sin(a) * 16 });
+        }
+        graphics.poly(pts).fill(arch.colorInt).stroke({ color: 0xffedd5, width: 2.5, alpha: 0.95 });
+        graphics.circle(0, 0, 9).stroke({ color: 0xf59e0b, width: 2, alpha: 0.85 });
+        graphics.circle(0, 0, 4).fill(0xffffff);
+      } else if (arch.id === 'pulsar_star') {
+        // Pulsar Star (8-pointed radiant nova star)
+        const pts: { x: number; y: number }[] = [];
+        for (let i = 0; i < 16; i++) {
+          const r = i % 2 === 0 ? 17 : 8;
+          const a = (i / 16) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+        }
+        graphics.poly(pts).fill(arch.colorInt).stroke({ color: 0xfecdd3, width: 2.2, alpha: 0.95 });
+        graphics.circle(0, 0, 6).fill(0xffffff).stroke({ color: 0xf43f5e, width: 1.5 });
+      } else if (arch.id === 'vortex_hexagon') {
+        // Vortex Hexagon (6-sided graviton titan with internal spiral)
+        const pts: { x: number; y: number }[] = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * 16, y: Math.sin(a) * 16 });
+        }
+        graphics.poly(pts).fill(arch.colorInt).stroke({ color: 0xe9d5ff, width: 2.5, alpha: 0.95 });
+        graphics.circle(0, 0, 8).stroke({ color: 0xd8b4fe, width: 1.8, alpha: 0.8 });
+        graphics.circle(0, 0, 3).fill(0x1e1b4b);
+      } else if (arch.id === 'prism_colossus') {
+        // Prism Colossus (faceted crystal diamond with cyan light rays)
+        const pts = [
+          { x: 0, y: -18 },
+          { x: 13, y: 0 },
+          { x: 0, y: 18 },
+          { x: -13, y: 0 }
+        ];
+        graphics.poly(pts).fill(arch.colorInt).stroke({ color: 0xcffafe, width: 2.5, alpha: 0.95 });
+        graphics.moveTo(0, -18).lineTo(0, 18).stroke({ color: 0xffffff, width: 1.8, alpha: 0.8 });
+        graphics.moveTo(-13, 0).lineTo(13, 0).stroke({ color: 0xffffff, width: 1.8, alpha: 0.8 });
+      } else {
+        // Hyper-Tesseract (4D nested square projection with void core)
+        graphics.rect(-13, -13, 26, 26).fill(arch.colorInt).stroke({ color: 0xe9d5ff, width: 2.5, alpha: 0.95 });
+        graphics.rect(-7, -7, 14, 14).stroke({ color: 0x38bdf8, width: 1.8, alpha: 0.85 });
+        graphics.circle(0, 0, 3).fill(0xffffff);
       }
     } else if (type === 'purple_pentagon') {
       const pts = [];
@@ -2304,7 +2375,10 @@ export class Simulation {
       rotation: Math.random() * Math.PI * 2,
       angularVelocity: (Math.random() - 0.5) * 0.04,
       blinkTimerMs: type === 'purple_pentagon' ? 2600 + Math.random() * 800 : undefined,
-      orbitRadius: type === 'circle' ? (115 + (Math.random() - 0.5) * 20) : undefined,
+      orbitRadius: undefined,
+      spiralInwardOffset: 0,
+      bossArchetype,
+      bossAbilityTimer: 0,
       orbitDirection: type === 'circle' ? (Math.random() < 0.5 ? 1 : -1) : undefined,
       orbitSpeed: type === 'circle' ? (0.013 + Math.random() * 0.003) : undefined,
       shootRange: type === 'circle' ? 210 : undefined,
@@ -2432,6 +2506,48 @@ export class Simulation {
     this.enemyProjectiles.push(p);
   }
 
+  private fireEnemyRadialProjectile(x: number, y: number, angle: number, speed: number = 2.2) {
+    let p = this.enemyProjectilePool.pop();
+    if (!p) {
+      const graphics = new Graphics();
+      graphics
+        .poly([
+          { x: 0, y: -6 },
+          { x: 3, y: 0 },
+          { x: 0, y: 6 },
+          { x: -3, y: 0 },
+        ])
+        .fill(0xf43f5e)
+        .stroke({ color: 0xffffff, width: 1.0, alpha: 0.8 });
+      graphics.circle(0, 0, 4).fill({ color: 0xf43f5e, alpha: 0.3 });
+      this.renderer.projectileContainer.addChild(graphics);
+
+      p = {
+        x,
+        y,
+        hp: 1,
+        maxHp: 1,
+        graphics,
+        speed,
+        dps: angle,
+        radius: 3,
+        rotation: 0,
+        angularVelocity: 0,
+      };
+    } else {
+      p.x = x;
+      p.y = y;
+      p.hp = 1;
+      p.maxHp = 1;
+      p.speed = speed;
+      p.dps = angle;
+      p.graphics.visible = true;
+      p.graphics.x = x;
+      p.graphics.y = y;
+    }
+    this.enemyProjectiles.push(p);
+  }
+
   private updateEnemyProjectiles(delta: number, onStateUpdate: (state: Partial<GameState>) => void) {
     const playerX = GAME_WIDTH / 2;
     const playerY = GAME_HEIGHT / 2;
@@ -2548,8 +2664,10 @@ export class Simulation {
         const waveDpsMult = 1 + (wave - 1) * (0.10 + (tier - 1) * 0.03);
         const finalRawDamage = rawDps * waveDpsMult * tierDpsMult;
         
-        const mitigatedDps = finalRawDamage * (1 - playerStats.defensePercent);
-        const netDamage = Math.max(0.2, Number((mitigatedDps - playerStats.defenseAbsolute).toFixed(2)));
+        const cappedDefPercent = Math.min(0.90, Math.max(0, playerStats.defensePercent || 0));
+        const mitigatedDps = finalRawDamage * (1 - cappedDefPercent);
+        const minDamageFloor = Math.max(0.5, finalRawDamage * 0.08);
+        const netDamage = Math.max(minDamageFloor, Number((mitigatedDps - (playerStats.defenseAbsolute || 0)).toFixed(2)));
 
         const newHp = Math.max(0, this.state.playerHp - netDamage);
         this.state.playerHp = Number(newHp.toFixed(2));
@@ -2569,12 +2687,11 @@ export class Simulation {
             this.popupManager.spawnText(playerX, playerY - 40, '✨ DEATH DEFIED!', 0xec4899);
             soundEngine.playHeal();
             onStateUpdate({ playerHp: 1 });
-            p.graphics.visible = false;
-            this.enemyProjectilePool.push(p);
-            this.enemyProjectiles.splice(i, 1);
             continue;
           }
 
+          if (this.isHandlingDeath) return;
+          this.isHandlingDeath = true;
           this.state.isDead = true;
           this.state.playerHp = 0;
           this.state.isWaveActive = false;
@@ -2584,6 +2701,8 @@ export class Simulation {
             isWaveActive: false,
             wave: this.state.wave,
             tier: this.state.tier,
+            enemiesRemaining: 0,
+            activeBoss: null,
           };
           this.clearAllEntities();
           this.pendingStateUpdate = {};
@@ -2894,6 +3013,7 @@ export class Simulation {
     const playerX = GAME_WIDTH / 2;
     const playerY = GAME_HEIGHT / 2;
     const playerRadius = PHYSICS_CONFIG.playerRadius;
+    const playerStats = this.getPlayerCombatStats();
 
     // 1. Move toward fortress center / orbit
     for (let i = 0; i < this.enemies.length; i++) {
@@ -2959,13 +3079,25 @@ export class Simulation {
       }
 
       if (enemy.type === 'circle') {
-        const myOrbitRadius = enemy.orbitRadius || 115;
-        const myShootRange = enemy.shootRange || 210;
+        // FULL REWORK: Orbit radius dynamically anchored inside player weapon attack range
+        // Seamlessly adapts when the player upgrades weapon attack range!
+        const playerAttackRadius = playerStats.attackRadius || ATTACK_RADIUS_CONFIG.default;
+        const maxAllowedOrbit = Math.max(playerRadius + 42, playerAttackRadius - 22);
+        const dynamicBaseOrbit = Math.max(playerRadius + 42, Math.min(playerAttackRadius * 0.72, maxAllowedOrbit));
+
+        // Progressive continuous inward spiral over time (down to player fortress clearance ring)
+        (enemy as any).spiralInwardOffset = Math.min(
+          dynamicBaseOrbit - (playerRadius + 28),
+          ((enemy as any).spiralInwardOffset || 0) + 0.03 * delta
+        );
+        const effectiveOrbitRadius = Math.max(playerRadius + 28, dynamicBaseOrbit - (enemy as any).spiralInwardOffset);
+
+        const myShootRange = Math.max(effectiveOrbitRadius + 40, 180);
         const myCooldown = enemy.shootCooldownMs || 1600;
         const myDirection = enemy.orbitDirection || 1;
         const myOrbitSpeed = enemy.orbitSpeed || 0.014;
 
-        // 1. Independent Shooting Behavior (fires whenever in range, completely decoupled from player attack radius)
+        // 1. Independent Shooting Behavior (fires whenever in range)
         if (dist <= myShootRange) {
           const lastShot = enemy.lastEnemyShotTime;
           if (lastShot === undefined) {
@@ -2977,8 +3109,8 @@ export class Simulation {
           }
         }
 
-        // 2. Independent Orbiting Movement & Standoff positioning
-        if (!enemy.isOrbiting && dist <= myOrbitRadius + 8) {
+        // 2. Dynamic Orbiting Movement & Inward Spiral Positioning
+        if (!enemy.isOrbiting && dist <= effectiveOrbitRadius + 15) {
           enemy.isOrbiting = true;
           enemy.orbitAngle = Math.atan2(enemy.y - playerY, enemy.x - playerX);
         }
@@ -2989,14 +3121,14 @@ export class Simulation {
           }
           enemy.orbitAngle += myDirection * myOrbitSpeed * delta;
 
-          // Smooth radial easing towards individual standoff radius
-          const smoothR = dist + (myOrbitRadius - dist) * Math.min(1, 0.08 * delta);
+          // Smooth radial easing towards dynamically shrinking orbit distance
+          const smoothR = dist + (effectiveOrbitRadius - dist) * Math.min(1, 0.08 * delta);
           enemy.x = playerX + Math.cos(enemy.orbitAngle) * smoothR;
           enemy.y = playerY + Math.sin(enemy.orbitAngle) * smoothR;
           enemy.rotation = enemy.orbitAngle + Math.PI; // Face fortress center
         } else {
           // Approach towards standoff orbit distance
-          if (dist > myOrbitRadius) {
+          if (dist > effectiveOrbitRadius) {
             enemy.x += (dx / dist) * (enemy.speed || 1.1) * delta;
             enemy.y += (dy / dist) * (enemy.speed || 1.1) * delta;
             enemy.rotation = Math.atan2(-dy, -dx);
@@ -3057,6 +3189,62 @@ export class Simulation {
         if (dist > playerRadius + enemy.radius) {
           enemy.x += (dx / dist) * (enemy.speed || 0.95) * delta;
           enemy.y += (dy / dist) * (enemy.speed || 0.95) * delta;
+        }
+      } else if (enemy.type === 'boss') {
+        // UNIQUE BOSS BEHAVIORS & ESCALATING ATTACKS
+        const arch = (enemy as any).bossArchetype || getBossArchetype(this.state.wave);
+
+        if (dist > playerRadius + enemy.radius) {
+          enemy.x += (dx / dist) * (enemy.speed || 0.45) * delta;
+          enemy.y += (dy / dist) * (enemy.speed || 0.45) * delta;
+          enemy.rotation += 0.015 * delta;
+        }
+
+        // Signature Boss Abilities
+        (enemy as any).bossAbilityTimer = ((enemy as any).bossAbilityTimer || 0) + delta * 16.666;
+
+        if (arch.id === 'pulsar_star' && (enemy as any).bossAbilityTimer >= 3600) {
+          (enemy as any).bossAbilityTimer = 0;
+          this.popupManager.spawnText(enemy.x, enemy.y - 20, '⭐ PULSAR RING!', 0xf43f5e);
+          soundEngine.playCrit();
+          for (let pIdx = 0; pIdx < 8; pIdx++) {
+            const angle = (pIdx / 8) * Math.PI * 2;
+            this.fireEnemyRadialProjectile(enemy.x, enemy.y, angle, 1.8);
+          }
+        } else if (arch.id === 'hyper_tesseract' && (enemy as any).bossAbilityTimer >= 4000) {
+          (enemy as any).bossAbilityTimer = 0;
+          if (dist > playerRadius + enemy.radius + 35) {
+            enemy.x += (dx / dist) * 35;
+            enemy.y += (dy / dist) * 35;
+            this.spawnExplosion(enemy.x, enemy.y, 24, 0x8b5cf6);
+            this.popupManager.spawnText(enemy.x, enemy.y - 20, '🌀 VOID LEAP!', 0xa855f7);
+            soundEngine.playZap();
+            // Spiral dart
+            const aimAngle = Math.atan2(playerY - enemy.y, playerX - enemy.x);
+            this.fireEnemyRadialProjectile(enemy.x, enemy.y, aimAngle, 2.5);
+          }
+        } else if (arch.id === 'prism_colossus' && (enemy as any).bossAbilityTimer >= 3800) {
+          (enemy as any).bossAbilityTimer = 0;
+          this.popupManager.spawnText(enemy.x, enemy.y - 20, '💎 PRISM DARTS!', 0x06b6d4);
+          const aimAngle = Math.atan2(playerY - enemy.y, playerX - enemy.x);
+          this.fireEnemyRadialProjectile(enemy.x, enemy.y, aimAngle - 0.28, 2.2);
+          this.fireEnemyRadialProjectile(enemy.x, enemy.y, aimAngle + 0.28, 2.2);
+        } else if (arch.id === 'vortex_hexagon' && (enemy as any).bossAbilityTimer >= 4200) {
+          (enemy as any).bossAbilityTimer = 0;
+          this.popupManager.spawnText(enemy.x, enemy.y - 20, '🌀 GRAVITON PULSE!', 0xa855f7);
+          soundEngine.playOrbitalBlock();
+          for (let mIdx = 0; mIdx < this.enemies.length; mIdx++) {
+            const other = this.enemies[mIdx];
+            if (other !== enemy && other.hp > 0 && !other.isAllied) {
+              const odx = playerX - other.x;
+              const ody = playerY - other.y;
+              const odist = Math.hypot(odx, ody);
+              if (odist > 50) {
+                other.x += (odx / odist) * 14;
+                other.y += (ody / odist) * 14;
+              }
+            }
+          }
         }
       } else {
         if (dist > playerRadius + enemy.radius) {
@@ -4321,6 +4509,7 @@ export class Simulation {
   }
 
   public resetRun(maxHp: number, startWave: number = 1) {
+    this.isHandlingDeath = false;
     this.clearAllEntities();
     this.enemiesDefeatedInRun = 0;
     this.cashEarnedInRun = 0;
@@ -4344,6 +4533,7 @@ export class Simulation {
     this.state.playerHp = adjustedMaxHp;
     this.state.playerMaxHp = adjustedMaxHp;
     this.state.isDead = false;
+    this.state.isWaveActive = true;
     this.state.wave = startWave;
     this.state.activeBoss = null;
     this.startWave();
@@ -4384,12 +4574,7 @@ export class Simulation {
     this.lastSyncedCash = this.state.cash;
 
     // Process external cosmic shard changes
-    if (this.lastSyncedShards !== undefined) {
-      const externalShardsDelta = state.cosmicShards - this.lastSyncedShards;
-      if (externalShardsDelta !== 0) {
-        this.state.cosmicShards = Math.max(0, (this.state.cosmicShards || 0) + externalShardsDelta);
-      }
-    } else {
+    if (state.isDead || state.cosmicShards !== this.lastSyncedShards) {
       this.state.cosmicShards = state.cosmicShards;
     }
     this.lastSyncedShards = this.state.cosmicShards;
@@ -4405,23 +4590,29 @@ export class Simulation {
     }
     this.lastSyncedCells = this.state.cells;
 
+    // Determine wave and death state safely without rapid regression loops
+    const isNowDead = Boolean(state.isDead || this.state.isDead);
+    const resolvedWave = state.isDead 
+      ? (state.wave || 1) 
+      : (state.wave === 1 ? 1 : Math.max(state.wave || 1, this.state.wave || 1));
+
     // Preserve real-time simulation state so async React re-renders never roll back enemy kill rewards, HP, or active wave status
     const realTimeCash = this.state.cash;
     const realTimeShards = this.state.cosmicShards;
     const realTimeCells = this.state.cells;
-    const realTimeHp = this.state.playerHp;
-    const realTimeWave = this.state.wave;
-    const realTimeWaveActive = this.state.isWaveActive;
-    const realTimeEnemiesRemaining = this.state.enemiesRemaining;
-    const realTimeActiveBoss = this.state.activeBoss;
+    const realTimeHp = isNowDead ? 0 : this.state.playerHp;
+    const realTimeWaveActive = isNowDead ? false : this.state.isWaveActive;
+    const realTimeEnemiesRemaining = isNowDead ? 0 : this.state.enemiesRemaining;
+    const realTimeActiveBoss = isNowDead ? null : this.state.activeBoss;
 
     this.state = {
       ...state,
+      isDead: isNowDead,
       cash: realTimeCash,
       cosmicShards: realTimeShards,
       cells: realTimeCells,
       playerHp: realTimeHp !== undefined ? realTimeHp : state.playerHp,
-      wave: Math.max(state.wave || 1, realTimeWave || 1),
+      wave: resolvedWave,
       isWaveActive: realTimeWaveActive !== undefined ? realTimeWaveActive : state.isWaveActive,
       enemiesRemaining: realTimeEnemiesRemaining !== undefined ? realTimeEnemiesRemaining : state.enemiesRemaining,
       activeBoss: realTimeActiveBoss !== undefined ? realTimeActiveBoss : state.activeBoss,

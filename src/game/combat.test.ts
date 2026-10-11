@@ -155,7 +155,7 @@ export function runProgressionPlaytestingMetrics(): {
       const w3 = w - 50;
       baseCrate = 340 + w3 * 16.0 + Math.pow(w3, 1.85) * 0.95;
     }
-    const isBoss = w % 5 === 0;
+    const isBoss = w % 10 === 0;
     const crate = baseCrate * (isBoss ? 1.4 : 1.0);
 
     let waveDropScale = 1.0;

@@ -6,7 +6,7 @@
 import React from 'react';
 import { ActiveRareDrop, ActiveSynergyCard, RarityTier } from '../types';
 import { RARITY_CONFIGS } from '../game/constants';
-import { Sparkles, Zap } from 'lucide-react';
+import { Cpu, Zap } from 'lucide-react';
 import { CardIcon } from './Icons';
 
 interface Props {
@@ -22,16 +22,16 @@ const getActiveCombos = (drops: ActiveRareDrop[]) => {
   const combos: Array<{ label: string; icon: string; color: string; desc: string }> = [];
 
   if (ids.has('rockets') && ids.has('poison')) {
-    combos.push({ label: 'Toxic Detonation', icon: '☣️', color: '#10b981', desc: 'Rockets detonate poison into large green explosive clouds!' });
+    combos.push({ label: 'Toxic Detonation', icon: '☣️', color: '#10b981', desc: 'Rockets detonate poison into massive green explosive clouds!' });
   }
   if (ids.has('rockets') && ids.has('lightning_chain')) {
     combos.push({ label: 'Shock Barrage', icon: '⚡', color: '#38bdf8', desc: 'Rockets discharge high-voltage electric zaps on impact!' });
   }
   if (ids.has('laser_sweep') && ids.has('lightning_chain')) {
-    combos.push({ label: 'Prismatic Zap', icon: '💫', color: '#00f5ff', desc: 'Laser sweep ignites electric arcs between intercepted shapes!' });
+    combos.push({ label: 'Prismatic Zap', icon: '💫', color: '#06b6d4', desc: 'Laser sweep ignites electric arcs between intercepted shapes!' });
   }
   if (ids.has('mortar_strike') && ids.has('poison')) {
-    combos.push({ label: 'Toxic Fallout', icon: '💥', color: '#10b981', desc: 'Mortar strikes spawn persistent toxic acid fallout zones!' });
+    combos.push({ label: 'Toxic Fallout', icon: '💥', color: '#34d399', desc: 'Mortar strikes spawn persistent toxic acid fallout zones!' });
   }
   if (ids.has('mortar_strike') && ids.has('lightning_chain')) {
     combos.push({ label: 'Electrified Mortar', icon: '⚡', color: '#facc15', desc: 'Mortars trigger EMP shockwaves zapping surrounding foes!' });
@@ -40,7 +40,7 @@ const getActiveCombos = (drops: ActiveRareDrop[]) => {
     combos.push({ label: 'Calamity Overload', icon: '🌀', color: '#a855f7', desc: 'Flow of Calamity triggers cosmic overload explosions & zaps!' });
   }
   if (ids.has('lightning_chain') && ids.has('poison')) {
-    combos.push({ label: 'Toxic Conduction', icon: '☣️', color: '#34d399', desc: 'Chain lightning transfers poison to all secondary targets!' });
+    combos.push({ label: 'Toxic Conduction', icon: '☣️', color: '#14b8a6', desc: 'Chain lightning transfers poison to all secondary targets!' });
   }
 
   return combos;
@@ -58,59 +58,69 @@ export const ActiveRareDropsHUD: React.FC<Props> = ({
   const activeCombos = getActiveCombos(activeRareDrops);
 
   return (
-    <div className={`flex flex-col items-center gap-1.5 bg-zinc-950/85 backdrop-blur-md px-1 py-2 rounded-l-xl border-y border-l transition-all duration-300 shadow-lg w-9 ${
+    <div className={`flex flex-col items-center gap-1.5 bg-[#050811]/90 backdrop-blur-md px-1.5 py-2 rounded-l-2xl border-y border-l transition-all duration-300 shadow-[0_0_20px_rgba(0,0,0,0.8)] select-none ${
       isBossActive 
-        ? 'border-purple-500/30 shadow-[0_4px_20px_rgba(168,85,247,0.15)] bg-zinc-950/90' 
-        : 'border-white/10'
+        ? 'border-purple-500/40 shadow-[0_4px_25px_rgba(168,85,247,0.25)]' 
+        : 'border-cyan-500/35 hover:border-cyan-400/60 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
     }`}>
+      {/* Matrix Deck Trigger Button */}
       <button
+        type="button"
         onClick={onOpenCompendium}
-        className="flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:opacity-80 transition-all text-amber-400 font-mono text-[7px] font-black shrink-0 pb-1 border-b border-white/10 w-full"
-        title="View Rare Drop Compendium"
+        className="flex flex-col items-center justify-center gap-0.5 cursor-pointer hover:brightness-125 transition-all text-cyan-400 font-mono text-[7.5px] font-black shrink-0 pb-1.5 border-b border-white/10 w-full active:scale-95"
+        title="Open Tactical Matrix Deck"
       >
-        <Sparkles className="w-3.5 h-3.5" />
-        <span>{usedSlots}/{totalSlots}</span>
+        <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+        <span className="text-[7px] tracking-tight">{usedSlots}/{totalSlots}</span>
       </button>
 
-      <div className="flex flex-col items-center gap-1 overflow-y-auto w-full no-scrollbar max-h-[150px] sm:max-h-[250px]">
+      {/* Active Skill Icons & Synergies List */}
+      <div className="flex flex-col items-center gap-1.5 overflow-y-auto w-full no-scrollbar max-h-[160px] sm:max-h-[260px]">
         {activeRareDrops.map((drop) => {
           const config = RARITY_CONFIGS[drop.rarity as RarityTier] || RARITY_CONFIGS.common;
           return (
             <div
               key={drop.instanceId}
-              className="w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 relative group overflow-hidden"
+              onClick={onOpenCompendium}
+              className="w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 relative group overflow-hidden cursor-pointer hover:scale-105 transition-transform"
               style={{
-                backgroundColor: `${config.colorHex}15`,
-                borderColor: `${config.colorHex}50`,
+                backgroundColor: `${config.colorHex}20`,
+                borderColor: `${config.colorHex}70`,
                 color: config.colorHex,
+                boxShadow: `0 0 10px ${config.colorHex}30`
               }}
-              title={`${drop.name} (${drop.effectMultiplier.toFixed(1)}x): ${drop.description}`}
+              title={`${drop.name}: ${drop.description} (Tap to manage in Matrix Deck)`}
             >
               <CardIcon icon={drop.icon} className="w-4 h-4 shrink-0" />
             </div>
           );
         })}
 
+        {/* Active Synergy Combos */}
         {activeCombos.map((combo, idx) => (
           <div
             key={idx}
-            className="w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 animate-pulse overflow-hidden"
+            onClick={onOpenCompendium}
+            className="w-7 h-7 rounded-xl border flex items-center justify-center shrink-0 animate-pulse overflow-hidden cursor-pointer hover:scale-105 transition-transform"
             style={{
-              backgroundColor: `${combo.color}20`,
-              borderColor: `${combo.color}80`,
+              backgroundColor: `${combo.color}25`,
+              borderColor: `${combo.color}90`,
               color: combo.color,
+              boxShadow: `0 0 12px ${combo.color}45`
             }}
-            title={`SYNERGY COMBO: ${combo.label} — ${combo.desc}`}
+            title={`SYNERGY ACTIVE: ${combo.label} — ${combo.desc}`}
           >
-            <span className="text-[12px] leading-none inline-flex items-center justify-center w-full h-full">{combo.icon}</span>
+            <span className="text-[13px] leading-none inline-flex items-center justify-center w-full h-full">{combo.icon}</span>
           </div>
         ))}
 
+        {/* Empty Sockets */}
         {Array.from({ length: Math.max(0, totalSlots - usedSlots) }).map((_, idx) => (
           <div
             key={idx}
-            className="w-6 h-6 rounded-lg border border-dashed border-white/20 bg-white/5 flex items-center justify-center text-[10px] text-zinc-600 font-mono shrink-0"
-            title="Empty Rare Drop Slot"
+            onClick={onOpenCompendium}
+            className="w-7 h-7 rounded-xl border border-dashed border-cyan-500/25 bg-cyan-950/10 flex items-center justify-center text-[10px] text-cyan-500/40 font-mono shrink-0 cursor-pointer hover:border-cyan-400 hover:text-cyan-300 transition-colors"
+            title="Empty Matrix Socket · Tap to Equip Skill"
           >
             +
           </div>

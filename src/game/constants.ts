@@ -486,9 +486,9 @@ export function calculateAscensionShards(highestWave: number, shardMultiplier: n
     difficultyPoints += deepWaves * 6.0 + Math.pow(deepWaves / 10, 1.4) * 18;
   }
 
-  // Boss milestone rewards (Every 5 waves features a boss encounter that awards difficulty bonus)
-  const bossesCleared = Math.floor(highestWave / 5);
-  const bossBonus = bossesCleared * 6.0;
+  // Boss milestone rewards (Every 10 waves features a unique geometric boss encounter awarding bonus shards)
+  const bossesCleared = Math.floor(highestWave / 10);
+  const bossBonus = bossesCleared * 15.0;
 
   // Tier difficulty scaling (multiplies by tier difficulty factor, not cash)
   const tierDifficultyMult = Math.pow(1.5, Math.max(0, (tier || 1) - 1));
@@ -497,17 +497,98 @@ export function calculateAscensionShards(highestWave: number, shardMultiplier: n
   return Math.max(12, totalShards);
 }
 
+export interface BossArchetypeConfig {
+  id: string;
+  name: string;
+  title: string;
+  colorHex: string;
+  colorInt: number;
+  sides: number;
+  speed: number;
+  hasShield: boolean;
+  signatureAbility: string;
+}
+
+export function getBossArchetype(wave: number): BossArchetypeConfig {
+  const bossCycle = Math.floor(wave / 10) % 5;
+  const hasShield = wave >= 50;
+  
+  switch (bossCycle) {
+    case 1:
+      return {
+        id: 'apex_decagon',
+        name: 'Apex Decagon',
+        title: 'The Iron Citadel',
+        colorHex: '#f59e0b',
+        colorInt: 0xf59e0b,
+        sides: 10,
+        speed: 0.42,
+        hasShield,
+        signatureAbility: 'Citadel Armor: Heavy mass & rotating barrier plates',
+      };
+    case 2:
+      return {
+        id: 'pulsar_star',
+        name: 'Pulsar Star',
+        title: 'The Supernova',
+        colorHex: '#f43f5e',
+        colorInt: 0xf43f5e,
+        sides: 8,
+        speed: 0.48,
+        hasShield,
+        signatureAbility: 'Pulsar Volley: Rhythmic 8-way radial projectile rings',
+      };
+    case 3:
+      return {
+        id: 'vortex_hexagon',
+        name: 'Vortex Hexagon',
+        title: 'The Graviton',
+        colorHex: '#a855f7',
+        colorInt: 0xa855f7,
+        sides: 6,
+        speed: 0.44,
+        hasShield,
+        signatureAbility: 'Graviton Singularity: Battlefield momentum warp & swarm surge',
+      };
+    case 4:
+      return {
+        id: 'prism_colossus',
+        name: 'Prism Colossus',
+        title: 'The Refractor',
+        colorHex: '#06b6d4',
+        colorInt: 0x06b6d4,
+        sides: 4,
+        speed: 0.46,
+        hasShield,
+        signatureAbility: 'Prismatic Sweep: Sweeping laser beams & orbital shard drones',
+      };
+    case 0:
+    default:
+      return {
+        id: 'hyper_tesseract',
+        name: 'Hyper-Tesseract',
+        title: 'The Void Sovereign',
+        colorHex: '#8b5cf6',
+        colorInt: 0x8b5cf6,
+        sides: 4,
+        speed: 0.50,
+        hasShield, // Always true since wave >= 50
+        signatureAbility: 'Harmonic Phase Shield & Hyperspace Void Leap',
+      };
+  }
+}
+
 export const WAVE_CONFIG = {
   getEnemiesForWave: (wave: number, tier: number = 1): number => {
-    const isBoss = wave % 5 === 0;
+    const isBoss = wave % 10 === 0;
     if (isBoss) {
-      // Boss waves: 1 Boss + escort adds (3 at wave 5, 5 at wave 10, up to 10 max)
-      return 1 + Math.min(10, Math.floor(wave / 5) * 2 + 1);
+      // Boss waves: 1 Boss + escort adds (3 at wave 10, up to 10 max)
+      return 1 + Math.min(10, Math.floor(wave / 10) * 2 + 1);
     }
     // Standard waves: 8 foes at Wave 1, scaling gradually (+2 every wave) up to 30 max
     return Math.min(30, 8 + (wave - 1) * 2);
   },
-  isBossWave: (wave: number) => wave % 5 === 0,
+  isBossWave: (wave: number) => wave % 10 === 0,
   enemiesPerWave: 10, // Backwards compatibility fallback
 };
 
