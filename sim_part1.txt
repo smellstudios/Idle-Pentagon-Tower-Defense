@@ -1,0 +1,250 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Graphics } from 'pixi.js';
+import { GameState, Upgrade, LifetimeStats } from '../types';
+import { Renderer } from './Renderer';
+import { 
+  GAME_WIDTH, 
+  GAME_HEIGHT, 
+  ENEMY_BASE_STATS, 
+  getEnemyWaveStats, 
+  WAVE_CONFIG, 
+  ATTACK_RADIUS_CONFIG, 
+  PHYSICS_CONFIG,
+  CARDS_CONFIG
+} from './constants';
+import { PopupManager } from './popups';
+import { soundEngine } from './sound';
+
+export interface Entity {
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  graphics: Graphics;
+  type?: string;
+  speed?: number;
+  dps?: number;
+  radius: number;
+  rotation: number;
+  angularVelocity: number;
+}
+
+export class Simulation {
+  private renderer: Renderer;
+  private state: GameState;
+  private upgrades: Upgrade[];
+
+  private enemies: Entity[] = [];
+  private projectiles: Entity[] = [];
+  public popupManager: PopupManager;
+
+  private lastShotTime: number = 0;
+  private spawnTimer: number = 0;
+  private damageTickTimer: number = 0;
+  private orbAngle: number = 0;
+  public enemiesDefeatedInRun: number = 0;
+  public cashEarnedInRun: number = 0;
+
+  // Visual & Physics states
+  private playerRotation: number = 0;
+  private playerAngularVelocity: number = 0;
+  private pulseTimer: number = 0;
+  private prevEnemiesInRangeCount: number = 0;
+
+  constructor(renderer: Renderer, initialState: GameState, upgrades: Upgrade[]) {
+    this.renderer = renderer;
+    this.state = initialState;
+    this.upgrades = upgrades;
+    this.popupManager = new PopupManager(this.renderer.popupContainer, 32);
+  }
+
+  public update(delta: number, currentTime: number, onStateUpdate: (state: Partial<GameState>) => void) {
+    if (this.state.isDead) return;
+
+    // Apply Game Speed modifier (1x, 1.5x, up to 5x from Labs)
+    const effectiveDelta = delta * (this.state.gameSpeed || 1.0);
+    const deltaMs = effectiveDelta * 16.67;
+    const playerStats = this.getPlayerCombatStats();
+    const effectiveRadius = playerStats.attackRadius;
+    const r2 = effectiveRadius * effectiveRadius;
+
+    const stateUpdate: Partial<GameState> = {};
+
+    if (this.state.attackRadius !== effectiveRadius) {
+      stateUpdate.attackRadius = effectiveRadius;
+    }
+
+    // 0. Update Popups
+    this.popupManager.beginFrame();
+    this.popupManager.setDensity(this.state.popupDensity || 'high');
+    this.popupManager.update(deltaMs);
+
+    // 1. Attack Radius & In-Range Detection
+    let inRangeCount = 0;
+    const targetsInRange: Entity[] = [];
+
+    for (const enemy of this.enemies) {
+      const dx = enemy.x - GAME_WIDTH / 2;
+      const dy = enemy.y - GAME_HEIGHT / 2;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= r2) {
+        inRangeCount++;
+        targetsInRange.push(enemy);
+      }
+    }
+
+    // Sort by distance to center
+    targetsInRange.sort((a, b) => {
+      const distA = Math.pow(a.x - GAME_WIDTH / 2, 2) + Math.pow(a.y - GAME_HEIGHT / 2, 2);
+      const distB = Math.pow(b.x - GAME_WIDTH / 2, 2) + Math.pow(b.y - GAME_HEIGHT / 2, 2);
+      return distA - distB;
+    });
+
+    const isIdle = inRangeCount === 0;
+    if (this.state.isPlayerIdle !== isIdle || this.state.enemiesInRangeCount !== inRangeCount) {
+      stateUpdate.isPlayerIdle = isIdle;
+      stateUpdate.enemiesInRangeCount = inRangeCount;
+    }
+
+    // Radar pulse trigger when enemy enters range
+    if (inRangeCount > 0 && this.prevEnemiesInRangeCount === 0 && (this.state.pulseOnEnemyEnter ?? true)) {
+      this.pulseTimer = 400;
+    }
+    this.prevEnemiesInRangeCount = inRangeCount;
+
+    if (this.pulseTimer > 0) {
+      this.pulseTimer = Math.max(0, this.pulseTimer - deltaMs);
+    }
+    const pulseProgress = this.pulseTimer > 0 ? (1 - this.pulseTimer / 400) : 0;
+    this.renderer.drawAttackRadius(effectiveRadius, this.state.showAttackRadius ?? true, pulseProgress);
+
+    // 2. Orbiting Energy Orbs Update
+    const orbCount = playerStats.orbitingOrbs;
+    if (orbCount > 0) {
+      const orbSpeed = 0.04 * (1 + (this.state.labResearchLevels?.['lab_orb_speed'] || 0) * 0.20);
+      this.orbAngle += orbSpeed * effectiveDelta;
+      this.renderer.drawOrbitingOrbs(orbCount, this.orbAngle, 36);
+
+      // Check collision between Orbs and Enemies
+      this.checkOrbCollisions(orbCount, this.orbAngle, 36, onStateUpdate);
+    } else {
+      this.renderer.drawOrbitingOrbs(0, 0);
+    }
+
+    // 3. Player Auto-fire (Multishot & Rapid Fire)
+    const fireInterval = 1000 / playerStats.fireRate;
+    if (currentTime - this.lastShotTime > fireInterval && targetsInRange.length > 0) {
+      // Primary Shot
+      this.fireProjectile(targetsInRange[0], playerStats);
+
+      // Multishot Chance: fire additional bolts at other targets in range
+      if (playerStats.multishotChance > 0 && Math.random() < playerStats.multishotChance) {
+        if (targetsInRange.length > 1) {
+          this.fireProjectile(targetsInRange[1], playerStats);
+        }
+        if (targetsInRange.length > 2 && Math.random() < 0.5) {
+          this.fireProjectile(targetsInRange[2], playerStats);
+        }
+      }
+
+      // Rapid Fire Chance: trigger immediate second volley
+      if (playerStats.rapidFireChance > 0 && Math.random() < playerStats.rapidFireChance) {
+        setTimeout(() => {
+          if (targetsInRange.length > 0 && !this.state.isDead) {
+            this.fireProjectile(targetsInRange[0], playerStats);
+          }
+        }, 120);
+      }
+
+      this.lastShotTime = currentTime;
+    }
+
+    // 4. Spawning & Wave Progression (10 enemies per wave)
+    if (this.state.isWaveActive) {
+      this.spawnTimer += deltaMs;
+      // Spawn interval ~900ms between foes (modified by Enemy Balance card)
+      const enemyBalanceCard = this.getEquippedCardEffect('enemy_balance');
+      const baseSpawnInterval = enemyBalanceCard ? 600 : 900;
+
+      if (this.spawnTimer > baseSpawnInterval && this.state.enemiesRemaining > 0) {
+        this.spawnEnemy();
+        this.spawnTimer = 0;
+        stateUpdate.enemiesRemaining = this.state.enemiesRemaining;
+      }
+
+      // Wave completed: all 10 enemies defeated
+      if (this.state.enemiesRemaining === 0 && this.enemies.length === 0) {
+        const nextWave = this.state.wave + 1;
+        const waveCashBonus = this.getWaveCompletionCashBonus(this.state.wave);
+        const waveShardsBonus = this.getWaveCompletionShardsBonus(this.state.wave);
+
+        stateUpdate.isWaveActive = false;
+        stateUpdate.wave = nextWave;
+        stateUpdate.highestWaveThisRun = Math.max(this.state.highestWaveThisRun || 1, nextWave);
+        stateUpdate.highestWaveEver = Math.max(this.state.highestWaveEver || 1, nextWave);
+        stateUpdate.cash = this.state.cash + waveCashBonus;
+        stateUpdate.cosmicShards = this.state.cosmicShards + waveShardsBonus;
+
+        // Update Lifetime stats
+        const currentTier = this.state.tier || 1;
+        const highestInTier = Math.max(this.state.stats?.highestWavePerTier?.[currentTier] || 0, nextWave);
+        const updatedStats: LifetimeStats = {
+          ...this.state.stats,
+          highestWavePerTier: {
+            ...(this.state.stats?.highestWavePerTier || {}),
+            [currentTier]: highestInTier,
+          },
+          lifetimeCash: (this.state.stats?.lifetimeCash || 0) + waveCashBonus,
+          lifetimeCosmicShards: (this.state.stats?.lifetimeCosmicShards || 0) + waveShardsBonus,
+        };
+        stateUpdate.stats = updatedStats;
+
+        // Check Milestone Unlocks & Missions
+        this.checkWaveMissionsAndMilestones(nextWave, currentTier, stateUpdate);
+        
+        this.state.isWaveActive = false;
+      }
+    } else {
+      // Auto-start next wave if clean
+      if (this.enemies.length === 0 && this.state.enemiesRemaining === 0) {
+        this.startWave();
+        stateUpdate.isWaveActive = true;
+        stateUpdate.enemiesRemaining = this.state.enemiesRemaining;
+        stateUpdate.totalEnemiesInWave = this.state.totalEnemiesInWave;
+      }
+    }
+
+    // 5. Move Entities & Rotations
+    this.updateEnemies(effectiveDelta, currentTime, isIdle, (partial) => Object.assign(stateUpdate, partial));
+    this.updateProjectiles(effectiveDelta, playerStats, (partial) => Object.assign(stateUpdate, partial));
+
+    // 6. Contact Damage & Turtle Defense (Defense % + Defense Absolute + Thorns Reflection)
+    this.damageTickTimer += deltaMs;
+    if (this.damageTickTimer >= 1000) {
+      let totalRawContactDps = 0;
+      let hasBossContact = false;
+
+      this.enemies.forEach(enemy => {
+        const dx = enemy.x - GAME_WIDTH / 2;
+        const dy = enemy.y - GAME_HEIGHT / 2;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= PHYSICS_CONFIG.playerRadius + enemy.radius + 3) {
+          totalRawContactDps += enemy.dps || 0;
+          if (enemy.type === 'boss') hasBossContact = true;
+
+          // THORN DAMAGE CALCULATION:
+          // Deals percentage of enemy's max HP back to the attacker upon contact.
+          // Bosses receive 50% reduced Thorn damage.
+          if (playerStats.thornsPercent > 0) {
+            const bossResistance = enemy.type === 'boss' ? 0.5 : 1.0;
+            const thornDamage = enemy.maxHp * playerStats.thornsPercent * bossResistance;
+            enemy.hp -= thornDamage;
+            this.popupManager.spawnDamage(enemy.x, enemy.y, thornDamage, false, 1.0);
+            enemy.angularVelocity += (Math.random() - 0.5) * 0.25;
+          }
+        }
+      });

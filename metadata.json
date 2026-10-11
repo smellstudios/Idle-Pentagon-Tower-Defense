@@ -1,0 +1,8 @@
+{
+  "name": "Pixel Pentagons: Idle Tower",
+  "description": "A mobile-first pixel-art idle tower game where you defend your stationary pentagon against waves of geometric enemies. Features deep upgrades and idle progression.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

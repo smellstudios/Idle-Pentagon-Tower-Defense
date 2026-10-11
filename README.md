@@ -1,11 +1,20 @@
-<div align="center">
+# Pixel Pentagons: Upgrade & Waves System
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+## State Model
+- **React Authority**: React maintains the authoritative state for upgrades, cash, gems, and wave progression.
+- **Pixi Consumption**: The simulation consumes state updates via `onStateUpdate` and `updateUpgrades`.
+- **Bulk Buy Mode**: Supported modes are `x1`, `x10`, and `xMax`.
 
-  <h1>Built with AI Studio</h2>
+## Component Architecture
+- `UpgradePanel`: Slide-up interface managing category tabs and bulk-buy selection.
+- `UpgradeTile`: Quarter-grid (2x2) layout for individual upgrades.
+- `WavesUI`: Informational strip anchored to the upgrade panel, providing real-time combat stats.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Math
+- **Cost Formula**: `cost = baseCost * costGrowth ^ level`
+- **Bulk Cost**: Iterative calculation for precision, capped at 1000 levels for `xMax` safety.
+- **Stat Growth**: Linear increments based on `baseValue + level * increment`.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>
+## Performance
+- Expensive bulk calculations are computed only on interaction.
+- Simulation uses a separate loop from React renders.
