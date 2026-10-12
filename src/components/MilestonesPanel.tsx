@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { GameState, MilestoneDef } from '../types';
 import { 
   Trophy, Sparkles, Gem, Lock, CheckCircle2, 
@@ -49,7 +49,14 @@ export const MilestonesPanel: React.FC<Props> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'compact'>('grid');
 
   const allMilestones: MilestoneDef[] = gameState.milestones || [];
-  const highestWave = gameState.highestWaveEver || 1;
+  
+  // Tier-specific highest wave resolver to ensure milestone readiness reflects actual tier records
+  const getTierHighestWave = useCallback((tier: number) => {
+    const recorded = gameState.stats?.highestWavePerTier?.[tier] || 0;
+    const currentInRun = (gameState.tier === tier) ? (gameState.wave || 1) : 0;
+    const fallbackTier1 = tier === 1 ? (gameState.highestWaveEver || 1) : 0;
+    return Math.max(recorded, currentInRun, fallbackTier1);
+  }, [gameState.stats?.highestWavePerTier, gameState.tier, gameState.wave, gameState.highestWaveEver]);
 
   // Tier info configurations for tiers 1-12
   const tierConfigs = useMemo(() => {
@@ -154,18 +161,21 @@ export const MilestonesPanel: React.FC<Props> = ({
     const stats: Record<number, { total: number; claimed: number; ready: number }> = {};
     for (let t = 1; t <= 12; t++) {
       const ms = allMilestones.filter(m => m.tier === t);
-      const ready = ms.filter(m => highestWave >= m.wave && !m.isClaimed).length;
+      const tWave = getTierHighestWave(t);
+      const ready = ms.filter(m => tWave >= m.wave && !m.isClaimed).length;
       const claimed = ms.filter(m => m.isClaimed).length;
       stats[t] = { total: ms.length, claimed, ready };
     }
     return stats;
-  }, [allMilestones, highestWave]);
+  }, [allMilestones, getTierHighestWave]);
+
+  const selectedTierWave = getTierHighestWave(selectedTier);
 
   // Category counts for selected tier
   const categoryCounts = useMemo(() => {
     const counts: Record<MilestoneCategory, number> = {
       all: tierMilestones.length,
-      ready: tierMilestones.filter(m => highestWave >= m.wave && !m.isClaimed).length,
+      ready: tierMilestones.filter(m => selectedTierWave >= m.wave && !m.isClaimed).length,
       unlocks: tierMilestones.filter(m => getMilestoneCategory(m) === 'unlocks').length,
       shards: tierMilestones.filter(m => getMilestoneCategory(m) === 'shards').length,
       gems: tierMilestones.filter(m => getMilestoneCategory(m) === 'gems').length,
@@ -174,12 +184,12 @@ export const MilestonesPanel: React.FC<Props> = ({
       claimed: tierMilestones.filter(m => m.isClaimed).length,
     };
     return counts;
-  }, [tierMilestones, highestWave]);
+  }, [tierMilestones, selectedTierWave]);
 
   // Filtered milestones
   const filteredMilestones = useMemo(() => {
     return tierMilestones.filter(m => {
-      const isReached = highestWave >= m.wave;
+      const isReached = selectedTierWave >= m.wave;
 
       // Category filter
       if (selectedCategory === 'ready') {
@@ -210,17 +220,17 @@ export const MilestonesPanel: React.FC<Props> = ({
 
       return true;
     });
-  }, [tierMilestones, highestWave, selectedCategory, searchQuery]);
+  }, [tierMilestones, selectedTierWave, selectedCategory, searchQuery]);
 
   // Ready milestones in current tier
   const readyTierMilestones = useMemo(() => {
-    return tierMilestones.filter(m => highestWave >= m.wave && !m.isClaimed);
-  }, [tierMilestones, highestWave]);
+    return tierMilestones.filter(m => selectedTierWave >= m.wave && !m.isClaimed);
+  }, [tierMilestones, selectedTierWave]);
 
   // Total ready milestones globally across all tiers
   const totalGlobalReadyCount = useMemo(() => {
-    return allMilestones.filter(m => highestWave >= m.wave && !m.isClaimed).length;
-  }, [allMilestones, highestWave]);
+    return allMilestones.filter(m => getTierHighestWave(m.tier) >= m.wave && !m.isClaimed).length;
+  }, [allMilestones, getTierHighestWave]);
 
   // Pending rewards calculation for current tier
   const pendingTierRewards = useMemo(() => {
@@ -503,7 +513,7 @@ export const MilestonesPanel: React.FC<Props> = ({
       {viewMode === 'grid' && filteredMilestones.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {filteredMilestones.map(m => {
-            const isReached = highestWave >= m.wave;
+            const isReached = selectedTierWave >= m.wave;
             const isClaimable = isReached && !m.isClaimed;
             const visual = getMilestoneVisual(m);
             const IconComp = visual.icon;
@@ -613,7 +623,7 @@ export const MilestonesPanel: React.FC<Props> = ({
       {viewMode === 'compact' && filteredMilestones.length > 0 && (
         <div className="space-y-1.5">
           {filteredMilestones.map(m => {
-            const isReached = highestWave >= m.wave;
+            const isReached = selectedTierWave >= m.wave;
             const isClaimable = isReached && !m.isClaimed;
             const visual = getMilestoneVisual(m);
             const IconComp = visual.icon;

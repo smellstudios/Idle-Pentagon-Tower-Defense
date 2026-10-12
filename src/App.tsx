@@ -210,6 +210,11 @@ export default function App() {
 
   const isDeathHandledThisRunRef = useRef(false);
 
+  const handleRespawn = useCallback(() => {
+    isDeathHandledThisRunRef.current = false;
+    respawnAndReset();
+  }, [respawnAndReset]);
+
   const handleStateUpdate = useCallback((partial: Partial<typeof gameState>) => {
     // Check for death trigger
     if (partial.isDead && !isDeathHandledThisRunRef.current) {
@@ -218,6 +223,7 @@ export default function App() {
       soundEngine.startAmbientMenu();
       const currentStore = useGameStore.getState();
       const waveReached = partial.wave ?? currentStore.wave ?? 1;
+      const inRunShards = partial.cosmicShards ?? currentStore.cosmicShards;
       const isNewRecord = waveReached > (currentStore.highestWaveEver || 0);
       handlePlayerDeath({
         waveReached,
@@ -226,8 +232,10 @@ export default function App() {
         highestWaveEver: Math.max(currentStore.highestWaveEver || 0, waveReached),
         newRecord: isNewRecord,
         ascensionCount: (currentStore.ascensionCount || 0) + 1,
-      });
-      setGameState({ ...partial, isDead: true, playerHp: 0, isWaveActive: false });
+      }, inRunShards);
+      // Strip cosmicShards from partial so it does not overwrite the freshly credited balance
+      const { cosmicShards: _omitShards, ...safePartial } = partial;
+      setGameState({ ...safePartial, isDead: true, playerHp: 0, isWaveActive: false });
       return;
     }
 
@@ -461,7 +469,7 @@ export default function App() {
       {/* Full-Screen Death & Ascension Screen */}
       <DeathSummary 
         gameState={gameState} 
-        onRespawn={respawnAndReset}
+        onRespawn={handleRespawn}
         onBuyWorkshopUpgrade={buyPermanentUpgrade}
         onDrawCardPack={drawCardPack}
         onToggleEquipCard={toggleEquipCard}
@@ -532,6 +540,7 @@ export default function App() {
         isDead={gameState.isDead}
         onClose={() => setIsAscensionOpen(false)}
         onConfirmAscension={() => {
+          isDeathHandledThisRunRef.current = false;
           softResetAndAscend();
           setIsAscensionOpen(false);
         }}

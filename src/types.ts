@@ -280,6 +280,9 @@ export interface GameState {
   ascensionCount: number;
   gameSpeed: number; // 1.0, 1.5 (beginner max), up to 3.0x via Lab Overclock
 
+  // In-Run Upgrades
+  upgrades?: Upgrade[];
+
   // Permanent Workshop Upgrades (id -> level)
   workshopUpgrades: Record<string, number>;
 
@@ -393,6 +396,7 @@ export interface ActiveSynergyCard {
   slotsGranted: number;
   globalBonusMult: number;
   description: string;
+  icon?: string;
 }
 
 export interface RareDropProgress {

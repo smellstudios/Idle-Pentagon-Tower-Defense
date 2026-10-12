@@ -233,11 +233,14 @@ export const DeathSummary: React.FC<Props> = ({
   const readyMissions = isMissionsUnlocked
     ? (gameState.missions?.filter(m => m.current >= m.target && !m.isClaimed).length || 0)
     : 0;
-  const readyMilestones = gameState.milestones?.filter(m => 
-    m.tier === currentTier && 
-    (gameState.stats?.highestWavePerTier?.[m.tier] || 0) >= m.wave && 
-    !m.isClaimed
-  ).length || 0;
+  const readyMilestones = gameState.milestones?.filter(m => {
+    if (m.tier !== currentTier || m.isClaimed) return false;
+    const tierBest = Math.max(
+      gameState.stats?.highestWavePerTier?.[m.tier] || 0,
+      m.tier === 1 ? (gameState.highestWaveEver || 0) : 0
+    );
+    return tierBest >= m.wave;
+  }).length || 0;
 
   const metaUnlockKey = `unlock_meta_${workshopCategory.toLowerCase().replace(/\s+/g, '')}`;
   const currentMetaUnlockLevel = gameState.workshopUpgrades?.[metaUnlockKey] || 0;

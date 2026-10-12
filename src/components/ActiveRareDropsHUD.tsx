@@ -22,25 +22,25 @@ const getActiveCombos = (drops: ActiveRareDrop[]) => {
   const combos: Array<{ label: string; icon: string; color: string; desc: string }> = [];
 
   if (ids.has('rockets') && ids.has('poison')) {
-    combos.push({ label: 'Toxic Detonation', icon: '☣️', color: '#10b981', desc: 'Rockets detonate poison into massive green explosive clouds!' });
+    combos.push({ label: 'Toxic Detonation', icon: 'Biohazard', color: '#10b981', desc: 'Rockets detonate poison into massive green explosive clouds!' });
   }
   if (ids.has('rockets') && ids.has('lightning_chain')) {
-    combos.push({ label: 'Shock Barrage', icon: '⚡', color: '#38bdf8', desc: 'Rockets discharge high-voltage electric zaps on impact!' });
+    combos.push({ label: 'Shock Barrage', icon: 'Zap', color: '#38bdf8', desc: 'Rockets discharge high-voltage electric zaps on impact!' });
   }
   if (ids.has('laser_sweep') && ids.has('lightning_chain')) {
-    combos.push({ label: 'Prismatic Zap', icon: '💫', color: '#06b6d4', desc: 'Laser sweep ignites electric arcs between intercepted shapes!' });
+    combos.push({ label: 'Prismatic Zap', icon: 'Sparkles', color: '#06b6d4', desc: 'Laser sweep ignites electric arcs between intercepted shapes!' });
   }
   if (ids.has('mortar_strike') && ids.has('poison')) {
-    combos.push({ label: 'Toxic Fallout', icon: '💥', color: '#34d399', desc: 'Mortar strikes spawn persistent toxic acid fallout zones!' });
+    combos.push({ label: 'Toxic Fallout', icon: 'Bomb', color: '#34d399', desc: 'Mortar strikes spawn persistent toxic acid fallout zones!' });
   }
   if (ids.has('mortar_strike') && ids.has('lightning_chain')) {
-    combos.push({ label: 'Electrified Mortar', icon: '⚡', color: '#facc15', desc: 'Mortars trigger EMP shockwaves zapping surrounding foes!' });
+    combos.push({ label: 'Electrified Mortar', icon: 'CloudLightning', color: '#facc15', desc: 'Mortars trigger EMP shockwaves zapping surrounding foes!' });
   }
   if (ids.has('flow_of_calamity') && drops.length >= 2) {
-    combos.push({ label: 'Calamity Overload', icon: '🌀', color: '#a855f7', desc: 'Flow of Calamity triggers cosmic overload explosions & zaps!' });
+    combos.push({ label: 'Calamity Overload', icon: 'Tornado', color: '#a855f7', desc: 'Flow of Calamity triggers cosmic overload explosions & zaps!' });
   }
   if (ids.has('lightning_chain') && ids.has('poison')) {
-    combos.push({ label: 'Toxic Conduction', icon: '☣️', color: '#14b8a6', desc: 'Chain lightning transfers poison to all secondary targets!' });
+    combos.push({ label: 'Toxic Conduction', icon: 'CloudLightning', color: '#14b8a6', desc: 'Chain lightning transfers poison to all secondary targets!' });
   }
 
   return combos;
@@ -110,7 +110,7 @@ export const ActiveRareDropsHUD: React.FC<Props> = ({
             }}
             title={`SYNERGY ACTIVE: ${combo.label} — ${combo.desc}`}
           >
-            <span className="text-[13px] leading-none inline-flex items-center justify-center w-full h-full">{combo.icon}</span>
+            <CardIcon icon={combo.icon} className="w-3.5 h-3.5 shrink-0" />
           </div>
         ))}
 

@@ -68,7 +68,8 @@ import {
   StopwatchIcon,
 } from './icons/CosmicShardIcons';
 import { GameState } from '../types';
-import { WORKSHOP_CONFIG, calculateWorkshopCost } from '../game/constants';
+import { WORKSHOP_CONFIG, calculateWorkshopCost, calculatePlayerCombatStats } from '../game/constants';
+import { formatCurrency } from '../utils/format';
 import { soundEngine } from '../game/sound';
 
 type WorkshopCategory = 'Attack' | 'Defense' | 'Utility' | 'Ultimate Weapons';

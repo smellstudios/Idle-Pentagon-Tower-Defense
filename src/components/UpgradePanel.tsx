@@ -253,6 +253,7 @@ export const UpgradePanel: React.FC<Props> = ({
                     <UpgradeTile 
                       key={item.upgrade.id}
                       upgrade={item.upgrade}
+                      allUpgrades={upgrades}
                       gameState={gameState}
                       onBuy={onBuy}
                       calculateCost={calculateUpgradeCost}

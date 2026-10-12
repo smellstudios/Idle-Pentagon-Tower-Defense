@@ -38,9 +38,11 @@ import {
 } from './icons/CosmicShardIcons';
 import { Upgrade, GameState } from '../types';
 import { formatCurrency } from '../utils/format';
+import { getLiveEffectiveUpgradeValue, getLiveEffectiveDelta, formatUpgradeValue } from '../game/constants';
 
 interface Props {
   upgrade: Upgrade;
+  allUpgrades?: Upgrade[];
   gameState: GameState;
   onBuy: (id: string) => void;
   calculateCost: (upgrade: Upgrade, level: number, amount: number) => number;
@@ -111,6 +113,7 @@ export const getUpgradeTileIcon = (id: string) => {
 
 export const UpgradeTile: React.FC<Props> = ({ 
   upgrade, 
+  allUpgrades,
   gameState, 
   onBuy, 
   calculateCost 
@@ -120,7 +123,17 @@ export const UpgradeTile: React.FC<Props> = ({
   const isMax = upgrade.maxLevel !== undefined && upgrade.level >= upgrade.maxLevel;
   const canAfford = !isMax && gameState.cash >= cost;
   
-  const currentValue = upgrade.baseValue + upgrade.level * upgrade.increment;
+  const upgradesList = allUpgrades || gameState.upgrades || [upgrade];
+
+  // Universal Live Total Effective Value calculation
+  const currentEffectiveValue = React.useMemo(() => {
+    return getLiveEffectiveUpgradeValue(upgrade.id, upgradesList, gameState);
+  }, [upgrade.id, upgradesList, gameState]);
+
+  // Universal Live Effective Delta preview for next level
+  const { delta } = React.useMemo(() => {
+    return getLiveEffectiveDelta(upgrade.id, amount, upgradesList, gameState, currentEffectiveValue);
+  }, [upgrade.id, amount, upgradesList, gameState, currentEffectiveValue]);
 
   // Track pointer down coordinates to distinguish taps from swipe gestures
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -176,10 +189,14 @@ export const UpgradeTile: React.FC<Props> = ({
   };
 
   const formatVal = (val: number) => {
-    if (upgrade.id === 'crit_chance') {
-      return `${parseFloat((val * 100).toFixed(1))}%`;
-    }
+    return formatUpgradeValue(upgrade.id, val);
+  };
+
+  // Concise benefit delta (+3 HP, +2.5 DMG, +0.25/s)
+  const getBenefitPreview = (): string => {
+    if (isMax) return 'MAX';
     if (
+      upgrade.id === 'crit_chance' ||
       upgrade.id === 'defense_percent' ||
       upgrade.id === 'thorns_percent' ||
       upgrade.id === 'life_steal' ||
@@ -192,7 +209,7 @@ export const UpgradeTile: React.FC<Props> = ({
       upgrade.id === 'armor_pierce' ||
       upgrade.id === 'interest_rate'
     ) {
-      return `${(val * 100).toFixed(1)}%`;
+      return `+${(delta * 100).toFixed(1)}%`;
     }
     if (
       upgrade.id === 'crit_multiplier' ||
@@ -201,30 +218,19 @@ export const UpgradeTile: React.FC<Props> = ({
       upgrade.id === 'boss_damage' ||
       upgrade.id === 'cash_per_wave'
     ) {
-      return `x${val.toFixed(2)}`;
+      return `+${delta.toFixed(2)}x`;
     }
     if (upgrade.id === 'attack_radius') {
-      return `${val.toFixed(0)}m`;
+      return `+${delta.toFixed(0)}m`;
     }
-    if (val % 1 === 0) return val.toString();
-    return val.toFixed(1);
-  };
-
-  // Concise benefit delta (+3 HP, +2.5 DMG, +0.25/s)
-  const getBenefitPreview = (): string => {
-    const inc = upgrade.increment;
-    if (upgrade.id === 'health_max') return `+${inc.toFixed(0)}`;
-    if (upgrade.id === 'hp_regen') return `+${inc.toFixed(2)}/s`;
-    if (upgrade.id === 'damage_flat') return `+${inc.toFixed(1)}`;
-    if (upgrade.id === 'shoot_speed') return `+${inc.toFixed(2)}/s`;
-    if (upgrade.id === 'crit_chance') return `+${(inc * 100).toFixed(1)}%`;
-    if (upgrade.id === 'crit_multiplier') return `+${inc.toFixed(2)}x`;
-    if (upgrade.id === 'attack_radius') return `+${inc.toFixed(0)}m`;
-    if (upgrade.id === 'multishot_chance') return `+${(inc * 100).toFixed(0)}%`;
-    if (upgrade.id === 'defense_percent') return `+${(inc * 100).toFixed(1)}%`;
-    if (upgrade.id === 'cash_bonus') return `+${(inc * 100).toFixed(0)}%`;
-    if (upgrade.id === 'cash_per_wave') return `+${(inc * 100).toFixed(0)}%`;
-    return `+${inc}`;
+    if (upgrade.id === 'shoot_speed' || upgrade.id === 'hp_regen') {
+      return `+${delta.toFixed(2)}/s`;
+    }
+    if (delta >= 1000) {
+      return `+${formatCurrency(delta)}`;
+    }
+    if (delta % 1 === 0) return `+${delta.toFixed(0)}`;
+    return `+${delta.toFixed(1)}`;
   };
 
   // Color theme per category
@@ -320,14 +326,24 @@ export const UpgradeTile: React.FC<Props> = ({
         </span>
       </div>
 
-      {/* 3. Middle: Concise Value & Delta */}
-      <div className="flex items-baseline justify-between gap-1 my-0.5 leading-none">
-        <span className={`text-[10px] sm:text-[11.5px] font-mono font-black tracking-tight shrink-0 ${theme.valueText}`}>
-          {getBenefitPreview()}
-        </span>
-        <span className="text-[8.5px] sm:text-[9px] font-mono text-zinc-400 tracking-tight tabular-nums text-right shrink-0">
-          {formatVal(currentValue)}{upgrade.unit || ''}
-        </span>
+      {/* 3. Middle: Live Total Effective Value & Next Delta */}
+      <div className="flex flex-col gap-0.5 my-0.5 leading-none w-full">
+        <div className="flex items-baseline justify-between gap-1 w-full">
+          <span className="text-[7.5px] sm:text-[8px] font-mono text-zinc-400 uppercase tracking-tight font-semibold shrink-0">
+            TOTAL
+          </span>
+          <span className={`text-[10.5px] sm:text-[11.5px] font-mono font-black tracking-tight tabular-nums text-right truncate ${theme.valueText}`}>
+            {formatVal(currentEffectiveValue)}
+          </span>
+        </div>
+        {!isMax && (
+          <div className="flex items-baseline justify-between gap-1 text-[8px] sm:text-[8.5px] font-mono text-zinc-400 w-full">
+            <span className="text-zinc-500 shrink-0">NEXT</span>
+            <span className="text-emerald-400 font-bold tabular-nums text-right shrink-0">
+              {getBenefitPreview()}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 4. Action Button: Compact & Tactile */}
@@ -348,7 +364,10 @@ export const UpgradeTile: React.FC<Props> = ({
           {isMax ? (
             <span>MAX</span>
           ) : (
-            <span>${formatCurrency(cost, gameState.settings?.useLegacyCurrencyFormat)}</span>
+            <div className="flex items-center justify-between w-full px-1.5 leading-none">
+              <span className="truncate font-black">${formatCurrency(cost, gameState.settings?.useLegacyCurrencyFormat)}</span>
+              <span className="text-[8px] sm:text-[8.5px] opacity-85 shrink-0 ml-1 font-bold tabular-nums">➔{formatVal(currentEffectiveValue + delta)}</span>
+            </div>
           )}
         </button>
       </div>

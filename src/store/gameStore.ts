@@ -25,6 +25,7 @@ import {
   LAB_RESEARCH_CONFIG, 
   calculateAscensionShards,
   calculateDeathCashReserve,
+  calculatePlayerCombatStats,
   getCardRequiredExp,
   RARE_DROPS_DEFINITIONS,
   LAB_SLOT_GEM_COSTS,
@@ -81,7 +82,7 @@ export interface GameStoreState extends GameState {
   setBulkBuyMode: (mode: 'x1' | 'x10' | 'xMax') => void;
   setGameSpeed: (speed: number) => void;
   updateSettings: (newSettings: Partial<GameSettings>) => void;
-  handlePlayerDeath: (summary: AscensionSummaryData) => void;
+  handlePlayerDeath: (summary: AscensionSummaryData, currentShardsBase?: number) => void;
   respawnAndReset: () => { baseHealth: number };
   softResetAndAscend: () => AscensionSummaryData;
   unlockTechNode: (nodeId: string) => { success: boolean; reason?: string };
@@ -93,7 +94,7 @@ const initialProgression = loadProgression();
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
   // Currencies (Credits & Gold Coins)
-  cash: initialProgression.cash,
+  cash: Math.max(40, initialProgression.cash || 0),
   cosmicShards: initialProgression.cosmicShards,
   gems: initialProgression.gems,
   cells: initialProgression.cells,
@@ -237,11 +238,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       const newUpgrades = state.upgrades.map(u => (u.id === upgradeId ? { ...u, level: u.level + buyCount } : u));
       
       // Recalculate Max HP if health was upgraded
-      const healthUpg = newUpgrades.find(u => u.id === 'health_max');
-      const permHpBonus = (state.workshopUpgrades?.['perm_base_hp'] || 0) * 20.0;
-      const cardHpBonus = state.equippedCardIds?.includes('card_health_plating') ? 1.4 : 1.0;
-      const baseHealth = (healthUpg?.baseValue || 20) + permHpBonus + (healthUpg?.level || 0) * (healthUpg?.increment || 3);
-      const maxHp = Math.round(baseHealth * cardHpBonus);
+      const newStats = calculatePlayerCombatStats(newUpgrades, state);
+      const maxHp = Math.round(newStats.effectiveMaxHp);
 
       set({
         cash: newCash,
@@ -328,11 +326,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       };
 
       // Recalculate base health if upgrading perm_base_hp
-      const healthUpg = state.upgrades.find(u => u.id === 'health_max');
-      const permHpBonus = (updatedUpgrades['perm_base_hp'] || 0) * 15.0;
+      const updatedState = { ...state, workshopUpgrades: updatedUpgrades };
+      const newStats = calculatePlayerCombatStats(state.upgrades, updatedState);
+      const baseHealth = Math.round(newStats.effectiveMaxHp);
       const techBonuses = computeTechBonuses(state.unlockedTechNodes || []);
-      const cardHpBonus = state.equippedCardIds?.includes('card_health_plating') ? 1.4 : 1.0;
-      const baseHealth = Math.round(((healthUpg?.baseValue || 15) + permHpBonus + (healthUpg?.level || 0) * (healthUpg?.increment || 3)) * cardHpBonus * techBonuses.healthMultiplier);
 
       // Recalculate death summary reserved cash if upgrading perm_starting_cash
       let updatedDeathSummary = state.deathSummary;
@@ -1270,6 +1267,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const milestone = state.milestones.find(m => m.tier === tier && m.wave === wave);
     if (!milestone || milestone.isClaimed) return;
 
+    // Validate tier-specific record
+    const tierRecord = Math.max(
+      state.stats?.highestWavePerTier?.[tier] || 0,
+      state.tier === tier ? (state.wave || 1) : 0,
+      tier === 1 ? (state.highestWaveEver || 1) : 0
+    );
+    if (tierRecord < milestone.wave) return;
+
     soundEngine.playUpgradeSuccess();
     let addGems = 0;
     let addShards = 0;
@@ -1301,7 +1306,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const readyMilestones = state.milestones.filter(m => {
       if (m.isClaimed) return false;
       if (tier !== undefined && m.tier !== tier) return false;
-      const highest = state.stats?.highestWavePerTier?.[m.tier] || 0;
+      const highest = Math.max(
+        state.stats?.highestWavePerTier?.[m.tier] || 0,
+        state.tier === m.tier ? (state.wave || 1) : 0,
+        m.tier === 1 ? (state.highestWaveEver || 1) : 0
+      );
       return highest >= m.wave;
     });
 
@@ -1373,7 +1382,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }));
   },
 
-  handlePlayerDeath: (summary: AscensionSummaryData) => {
+  handlePlayerDeath: (summary: AscensionSummaryData, currentShardsBase?: number) => {
     const state = get();
     soundEngine.playAscension();
 
@@ -1381,12 +1390,32 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const rawShards = calculateAscensionShards(summary.waveReached, 1.0, state.tier || 1);
     
     // Performance bonuses from run:
-    const enemiesBonusShards = Math.floor((summary.enemiesDefeated || 0) / 10); // +1 shard per 10 hostiles neutralized
+    const isFirstDeath = (state.ascensionCount || 0) === 0;
+    const leewayBonus = isFirstDeath ? 30 : 0;
+    const baseSettlement = 10;
+    const waveBonusShards = Math.floor(summary.waveReached * 0.5);
+    const enemiesBonusShards = Math.max(1, Math.floor((summary.enemiesDefeated || 0) / 10)); // +1 shard per 10 hostiles neutralized
     const bossesBonusShards = Math.floor(summary.waveReached / 10) * 15; // +15 shards per boss neutralized (bosses spawn every 10 waves)
     const recordBonusShards = summary.newRecord ? 15 : 0; // +15 shards record breaker milestone
-    const subtotalRaw = rawShards + enemiesBonusShards + bossesBonusShards + recordBonusShards;
-    const shardsEarned = Math.round(subtotalRaw * techBonuses.cosmicShardGainMultiplier);
+    const subtotalRaw = Math.max(15, rawShards + baseSettlement + waveBonusShards + enemiesBonusShards + bossesBonusShards + recordBonusShards + leewayBonus);
+    const shardsEarned = Math.max(15, Math.round(subtotalRaw * techBonuses.cosmicShardGainMultiplier));
     const techBonusShards = shardsEarned - subtotalRaw;
+
+    // Guaranteed safe base shards: always respect whichever is higher between in-run real-time accumulator and store balance
+    const baseShards = currentShardsBase !== undefined ? Math.max(state.cosmicShards, currentShardsBase) : state.cosmicShards;
+    const finalShardsBalance = baseShards + shardsEarned;
+
+    console.info('[DEATH_SETTLEMENT] Awarded:', {
+      baseSettlement,
+      waveBonusShards,
+      enemiesBonusShards,
+      bossesBonusShards,
+      leewayBonus,
+      rawShards,
+      totalEarned: shardsEarned,
+      newBalance: finalShardsBalance,
+      isFirstDeath,
+    });
     
     // Check for Loanshark Card (Epic: 1.25x base + 0.35x per level)
     let loansharkMultiplier = 1.0;
@@ -1399,7 +1428,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     const workshopStartingCashLevel = state.workshopUpgrades?.['perm_starting_cash'] || 0;
     const labDeathReserveLevel = state.labResearchLevels?.['lab_death_reserve'] || 0;
-    const isFirstDeath = (state.ascensionCount || 0) === 0;
 
     const reservedCash = calculateDeathCashReserve(
       Math.max(state.highestWaveEver, summary.waveReached),
@@ -1413,7 +1441,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
     const nextState = {
       isDead: true,
-      cosmicShards: state.cosmicShards + shardsEarned,
+      cosmicShards: finalShardsBalance,
       ascensionCount: state.ascensionCount + 1,
       deathSummary: {
         ...summary,
@@ -1442,7 +1470,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     // Save progression asynchronously
     saveFullProgression({
       cash: reservedCash,
-      cosmicShards: state.cosmicShards + shardsEarned,
+      cosmicShards: finalShardsBalance,
       gems: state.gems,
       cells: state.cells,
       tournamentStones: state.tournamentStones,
@@ -1682,7 +1710,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       state.deathSummary?.waveReached || state.wave || 1,
       techBonuses.startingCashBonus
     );
-    const startingCash = Math.max(state.deathSummary?.reservedCashGained || 0, computedStartingCash);
+    const startingCash = Math.max(40, state.deathSummary?.reservedCashGained || 0, computedStartingCash);
     
     // Reset in-run upgrades
     const resetUpgrades = state.upgrades.map(u => ({ ...u, level: 0 }));

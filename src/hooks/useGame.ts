@@ -27,15 +27,24 @@ export function useGame() {
   useEffect(() => {
     if (gameManagerRef.current) {
       gameManagerRef.current.updateState(store);
-    }
-  }, [store.cash, store.cosmicShards, store.tier, store.wave, store.isDead, store.gameSpeed]);
-
-  // Synchronize upgrades to PIXI simulation instance
-  useEffect(() => {
-    if (gameManagerRef.current) {
       gameManagerRef.current.updateUpgrades(store.upgrades);
     }
-  }, [store.upgrades]);
+  }, [
+    store.cash, 
+    store.cosmicShards, 
+    store.tier, 
+    store.wave, 
+    store.isDead, 
+    store.gameSpeed,
+    store.upgrades,
+    store.workshopUpgrades,
+    store.cards,
+    store.equippedCardIds,
+    store.labResearchLevels,
+    store.unlockedTechNodes,
+    store.fireProtocol,
+    store.activeRareDrops,
+  ]);
 
   // Periodic Auto-Save (Asynchronous, Non-Blocking via IndexedDB)
   useEffect(() => {
@@ -177,6 +186,7 @@ export function useGame() {
     ascensionCount: store.ascensionCount,
     gameSpeed: store.gameSpeed,
     workshopUpgrades: store.workshopUpgrades,
+    upgrades: store.upgrades,
     unlockedTechNodes: store.unlockedTechNodes,
     cards: store.cards,
     maxCardSlots: store.maxCardSlots,

@@ -80,7 +80,7 @@ export const RareDropNotificationModal: React.FC<Props> = ({
               borderColor: `${rarityConfig.colorHex}50`,
             }}
           >
-            <CardIcon icon={'icon' in item ? item.icon : '🔮'} className="w-10 h-10" />
+            <CardIcon icon={'icon' in item && item.icon ? item.icon : 'synergy_card_matrix'} className="w-10 h-10" />
           </motion.div>
 
           {/* Title & Description */}

@@ -57,7 +57,8 @@ import {
   Trophy,
   Waves,
   Wrench, Swords, ChevronsUp, Tornado, ScanLine, Bomb,
-  Sword, Heart, ToolCase
+  Sword, Heart, ToolCase,
+  Crown, CloudFog, CloudRain, Gem, Boxes, Radiation
 } from 'lucide-react';
 
 /**
@@ -318,8 +319,21 @@ export const CardIcon: React.FC<{
     Timer,
     Trophy,
     Waves,
-    Wrench, Swords, ChevronsUp, Tornado, ScanLine, Bomb,
-    Sword, Heart, ToolCase,
+    Wrench,
+    Swords,
+    ChevronsUp,
+    Tornado,
+    ScanLine,
+    Bomb,
+    Sword,
+    Heart,
+    ToolCase,
+    Crown,
+    CloudFog,
+    CloudRain,
+    Gem,
+    Boxes,
+    Radiation,
     Damage: Sword,
     Health: Heart,
     Utility: ToolCase,
@@ -327,7 +341,8 @@ export const CardIcon: React.FC<{
     toolbox: ToolCase,
     sword: Sword,
     heart: Heart,
-    // Custom Rare Drop Icons mapped to Lucide
+
+    // Custom Rare Drop Icons mapped to Lucide (with 'drop_' prefix)
     drop_double_shot: Swords,
     drop_piercing: ChevronsUp,
     drop_rapid_fire: Flame,
@@ -337,16 +352,57 @@ export const CardIcon: React.FC<{
     drop_rockets: Rocket,
     drop_laser_sweep: ScanLine,
     drop_mortar_strike: Bomb,
+    drop_poison_linger: CloudFog,
+    drop_decaying_plague: Radiation,
+    drop_shrapnel_rainfall: CloudRain,
+
+    // Bare ID aliases (without 'drop_' prefix)
+    double_shot: Swords,
+    piercing: ChevronsUp,
+    rapid_fire: Flame,
+    flow_of_calamity: Tornado,
+    lightning_chain: CloudLightning,
+    poison: Biohazard,
+    rockets: Rocket,
+    laser_sweep: ScanLine,
+    mortar_strike: Bomb,
+    poison_linger: CloudFog,
+    decaying_plague: Radiation,
+    shrapnel_rainfall: CloudRain,
+
+    // Boss Synergy Matrix Card & Deck Sockets
+    synergy_card_matrix: Layers,
+    synergy_matrix: Layers,
+    synergy: Layers,
+    matrix_chip: Cpu,
+    matrix_socket: Boxes,
+
+    // Combo & Emoji fallbacks mapped to crisp SVG vectors
+    '☣️': Biohazard,
+    '⚡': Zap,
+    '💫': Sparkles,
+    '💥': Bomb,
+    '🌀': Tornado,
+    '🔮': Boxes,
+    '👑': Crown,
+    '💎': Gem,
+    '✨': Sparkles,
+    '🚀': Rocket,
+    '💣': Bomb,
+    '💀': Skull,
+    '🛡️': Shield,
+    '⚠️': ShieldAlert,
   };
 
-  const IconComponent = IconMap[icon];
+  const normalized = (icon || '').trim();
+  const IconComponent = IconMap[normalized] || IconMap[normalized.toLowerCase()];
   
   if (IconComponent) {
     return <IconComponent className={className} />;
   }
 
-  // If it's likely an emoji or raw character, render as text
-  return <span className={`inline-flex items-center justify-center leading-none ${className}`}>{icon}</span>;
+  // Pure vector fallback — NEVER render raw string text inside icon slots
+  return <Fallback className={className} />;
 };
 
 /**
@@ -375,9 +431,15 @@ export const EnemyIcon: React.FC<{
       );
     case 'big_square':
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" className={`${baseClass} drop-shadow-[0_0_6px_rgba(59,130,246,0.6)]`}>
-          <rect x="3" y="3" width="18" height="18" fill="#3b82f6" stroke="#ffffff" strokeWidth="1.5" strokeOpacity="0.8" rx="2" />
-          <text x="12" y="15" fill="#ffffff" fontSize="8" fontWeight="black" textAnchor="middle" fontFamily="monospace">HP</text>
+        <svg width={size} height={size} viewBox="0 0 24 24" className={`${baseClass} drop-shadow-[0_0_8px_rgba(59,130,246,0.7)]`}>
+          <rect x="3" y="3" width="18" height="18" fill="#2563eb" stroke="#ffffff" strokeWidth="1.5" strokeOpacity="0.9" rx="2" />
+          {/* Heavy armored reinforced bulkhead & crossbeams (no ugly text) */}
+          <rect x="7" y="7" width="10" height="10" fill="#1d4ed8" stroke="#93c5fd" strokeWidth="1.2" rx="1" />
+          <line x1="12" y1="3" x2="12" y2="7" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity="0.9" />
+          <line x1="12" y1="17" x2="12" y2="21" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity="0.9" />
+          <line x1="3" y1="12" x2="7" y2="12" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity="0.9" />
+          <line x1="17" y1="12" x2="21" y2="12" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity="0.9" />
+          <circle cx="12" cy="12" r="2" fill="#93c5fd" />
         </svg>
       );
     case 'circle':
@@ -458,9 +520,13 @@ export const EnemyIcon: React.FC<{
       );
     case 'boss':
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" className={`${baseClass} drop-shadow-[0_0_8px_rgba(168,85,247,0.8)]`}>
-          <polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" fill="#a855f7" stroke="#ffffff" strokeWidth="1.5" strokeOpacity="0.8" />
-          <text x="12" y="15" fill="#ffffff" fontSize="9" fontWeight="black" textAnchor="middle">👑</text>
+        <svg width={size} height={size} viewBox="0 0 24 24" className={`${baseClass} drop-shadow-[0_0_12px_rgba(168,85,247,0.95)]`}>
+          <polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" fill="#a855f7" stroke="#ffffff" strokeWidth="1.5" strokeOpacity="0.9" />
+          {/* Radiant vector apex crown emblem (crisp vector silhouette, no emoji/text) */}
+          <path d="M7 16L6 10.5L9 12.5L12 8.5L15 12.5L18 10.5L17 16H7Z" fill="#fde047" stroke="#ffffff" strokeWidth="0.8" strokeLinejoin="round" />
+          <circle cx="12" cy="6.5" r="1.2" fill="#fef08a" stroke="#ca8a04" strokeWidth="0.5" />
+          <circle cx="6" cy="8.5" r="0.9" fill="#fef08a" stroke="#ca8a04" strokeWidth="0.5" />
+          <circle cx="18" cy="8.5" r="0.9" fill="#fef08a" stroke="#ca8a04" strokeWidth="0.5" />
         </svg>
       );
     default:

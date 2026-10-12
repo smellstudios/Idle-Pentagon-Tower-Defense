@@ -5,6 +5,7 @@
 
 import { CardDef, LabResearchDef, MilestoneDef, MissionDef, RarityConfig, RarityTier, RareDropType, ActiveSynergyCard, ActiveRareDrop, Upgrade, GameState } from '../types';
 import { computeTechBonuses } from './techTree';
+import { formatCurrency } from '../utils/format';
 
 export const GAME_WIDTH = 450; // Logical width
 export const GAME_HEIGHT = 810; // Logical height (Portrait oriented)
@@ -578,6 +579,23 @@ export function getBossArchetype(wave: number): BossArchetypeConfig {
   }
 }
 
+export const SHARD_BOUNTY_BY_SHAPE: Record<string, number> = {
+  orange_triangle: 1,
+  circle: 1,
+  purple_pentagon: 2,
+  emerald_diamond: 2,
+  big_square: 3,
+  enraged_trapezium: 2,
+  gold_hexagon: 4,
+  disruptor_emp: 3,
+  reflector_prism: 3,
+  splitter_cluster: 3,
+  cluster_mini: 1,
+  crimson_octagon: 5,
+  phase_shifter: 4,
+  boss: 12,
+};
+
 export const WAVE_CONFIG = {
   getEnemiesForWave: (wave: number, tier: number = 1): number => {
     const isBoss = wave % 10 === 0;
@@ -585,10 +603,16 @@ export const WAVE_CONFIG = {
       // Boss waves: 1 Boss + escort adds (3 at wave 10, up to 10 max)
       return 1 + Math.min(10, Math.floor(wave / 10) * 2 + 1);
     }
+    const isElite = wave % 10 === 5;
+    if (isElite) {
+      // Elite waves: 3 champions + lighter vanguard
+      return Math.min(22, 6 + (wave - 1) * 1.5);
+    }
     // Standard waves: 8 foes at Wave 1, scaling gradually (+2 every wave) up to 30 max
     return Math.min(30, 8 + (wave - 1) * 2);
   },
   isBossWave: (wave: number) => wave % 10 === 0,
+  isEliteWave: (wave: number) => wave % 10 === 5,
   enemiesPerWave: 10, // Backwards compatibility fallback
 };
 
@@ -3367,6 +3391,7 @@ export function rollBossRareDrop(wave: number): { dropType: 'drop' | 'synergy'; 
       slotsGranted: 1,
       globalBonusMult: rarityConfig.effectMultiplier,
       description: `+1 Active Rare Drop Slot & +${Math.round((rarityConfig.effectMultiplier - 1) * 100)}% global drop power.`,
+      icon: 'synergy_card_matrix',
     };
     return { dropType: 'synergy', item: card };
   } else {
@@ -3463,9 +3488,12 @@ export function calculatePlayerCombatStats(arg1: Upgrade[] | Partial<GameState>,
 
   const scroungerActive = state.equippedCardIds?.includes('card_scrounger_protocol');
   const healthCardMult = 1 + (getEquippedCardEffect('health') || 0);
-  const effectiveMaxHp = (scroungerActive ? ((state.playerMaxHp || 100) * 0.9) : (state.playerMaxHp || 100)) * healthCardMult * firstRunAssistMult * techBonuses.healthMultiplier;
+  const healthUpg = safeUpgrades.find(u => u.id === 'health_max');
+  const permHp = (state.workshopUpgrades?.['perm_base_hp'] || 0) * 15.0;
+  const baseHealth = (healthUpg?.baseValue || 15) + permHp + (healthUpg?.level || 0) * (healthUpg?.increment || 3);
+  const effectiveMaxHp = Math.round(baseHealth * healthCardMult * firstRunAssistMult * techBonuses.healthMultiplier * (scroungerActive ? 0.9 : 1.0));
 
-  const hpPercent = (state.playerHp !== undefined ? state.playerHp : effectiveMaxHp) / effectiveMaxHp;
+  const hpPercent = (state.playerHp !== undefined ? state.playerHp : effectiveMaxHp) / Math.max(1, effectiveMaxHp);
   const missingHpFactor = Math.max(0, 1 - hpPercent);
   const berserkerRate = getEquippedCardEffect('berserker_damage') || 0;
   const berserkerMult = 1 + (missingHpFactor * 100 * berserkerRate);
@@ -3527,7 +3555,7 @@ export function calculatePlayerCombatStats(arg1: Upgrade[] | Partial<GameState>,
   const permDefPercent = (state.workshopUpgrades?.['perm_defense_percent'] || 0) * 0.01;
   const cardDefPercent = getEquippedCardEffect('defense_percent') || 0;
   const labDefPercentMult = 1 + (state.labResearchLevels?.['lab_defense_percent_boost'] || 0) * 0.04;
-  const defPercent = Math.min(0.85, (((defPercentUpg?.level || 0) * (defPercentUpg?.increment || 0.005)) + permDefPercent + cardDefPercent + techBonuses.damageReductionPercent) * labDefPercentMult);
+  const defPercent = Math.min(0.90, (((defPercentUpg?.level || 0) * (defPercentUpg?.increment || 0.005)) + permDefPercent + cardDefPercent + techBonuses.damageReductionPercent) * labDefPercentMult);
 
   const defAbsUpgObj = safeUpgrades.find(u => u.id === 'defense_absolute');
   const defAbsUpg = (defAbsUpgObj?.level || 0) * (defAbsUpgObj?.increment || 1.5);
@@ -3592,6 +3620,340 @@ export function calculatePlayerCombatStats(arg1: Upgrade[] | Partial<GameState>,
     spawnRateMult: 1 - (getEquippedCardEffect('spawn_rate') || 0),
     effectiveMaxHp,
     dps: calculatedDps,
+  };
+}
+
+/**
+ * Universal Single-Source-of-Truth Live Effective Stat Evaluator.
+ * Computes the player's true live effective value for any in-run upgrade ID,
+ * aggregating base stat + run levels + permanent shard upgrades + cards + labs + tech bonuses.
+ */
+export function getLiveEffectiveUpgradeValue(
+  upgradeId: string,
+  upgrades: Upgrade[],
+  state: Partial<GameState>,
+  providedStats?: PlayerCombatStats
+): number {
+  const stats = providedStats || calculatePlayerCombatStats(upgrades, state);
+  const upg = upgrades.find(u => u.id === upgradeId);
+  const lvl = upg?.level || 0;
+
+  const getCardEffect = (effectType: string): number => {
+    if (!state.equippedCardIds || state.equippedCardIds.length === 0) return 0;
+    let total = 0;
+    for (const cardId of state.equippedCardIds) {
+      const cardDef = CARDS_CONFIG.find(c => c.id === cardId);
+      const playerCard = state.cards?.[cardId];
+      if (cardDef && cardDef.effectType === effectType && playerCard) {
+        total += cardDef.baseValue + (playerCard.level - 1) * cardDef.valuePerLevel;
+      }
+    }
+    return total;
+  };
+
+  switch (upgradeId) {
+    // Attack
+    case 'damage_flat':
+      return stats.damage;
+    case 'shoot_speed':
+      return stats.fireRate;
+    case 'crit_chance':
+      return stats.critChance;
+    case 'crit_multiplier':
+      return stats.critMultiplier;
+    case 'attack_radius':
+      return stats.attackRadius;
+    case 'multishot_chance':
+      return stats.multishotChance;
+    case 'rapid_fire_chance':
+      return stats.rapidFireChance;
+    case 'bounce_shot_chance':
+      return stats.bounceShotChance;
+    case 'boss_damage':
+      return stats.bossDamageMult;
+    case 'armor_pierce':
+      return stats.armorPierce;
+
+    // Defense / Health
+    case 'health_max':
+      return stats.effectiveMaxHp;
+    case 'hp_regen':
+      return stats.hpRegen;
+    case 'defense_percent':
+      return stats.defensePercent;
+    case 'defense_absolute':
+      return stats.defenseAbsolute;
+    case 'thorns_percent':
+      return stats.thornsPercent;
+    case 'life_steal':
+      return stats.lifeStealPercent;
+    case 'knockback_chance':
+      return stats.knockbackChance;
+    case 'plasma_barrier_chance':
+      return stats.plasmaBarrierChance;
+    case 'orbiting_orbs':
+      return stats.orbitingOrbs;
+
+    // Utility
+    case 'cash_bonus': {
+      const inRunBonus = (upg?.baseValue || 1.0) + lvl * (upg?.increment || 0.10);
+      const permCash = (state.workshopUpgrades?.['perm_cash_bonus'] || 0) * 0.05;
+      const cardCash = getCardEffect('cash');
+      const tierMult = getTierCashMultiplier(state.tier || 1);
+      return inRunBonus * (1 + permCash) * (1 + cardCash) * tierMult;
+    }
+    case 'cash_per_wave': {
+      const inRunSupply = (upg?.baseValue || 1.0) + lvl * (upg?.increment || 0.15);
+      const permSupply = (state.workshopUpgrades?.['perm_supply_drop'] || 0) * 0.08;
+      const labSupply = (state.labResearchLevels?.['lab_supply_drop'] || 0) * 0.10;
+      const cardSupply = getCardEffect('cash_per_wave');
+      return inRunSupply * (1 + permSupply) * (1 + labSupply) * (1 + cardSupply);
+    }
+    case 'shards_per_kill': {
+      const inRunShard = (upg?.baseValue || 1.0) + lvl * (upg?.increment || 0.05);
+      const permShard = (state.workshopUpgrades?.['perm_shards_per_kill'] || 0) * 0.05;
+      const cardShard = getCardEffect('shards');
+      return inRunShard * (1 + permShard) * (1 + cardShard);
+    }
+    case 'shards_per_wave': {
+      const inRunShardsWave = lvl * (upg?.increment || 1);
+      const permShardsWave = (state.workshopUpgrades?.['perm_shards_per_wave'] || 0);
+      return 1 + inRunShardsWave + permShardsWave;
+    }
+    case 'free_upgrade_chance': {
+      const inRunFree = lvl * (upg?.increment || 0.02);
+      const permFree = (state.workshopUpgrades?.['perm_free_upgrade_chance'] || 0) * 0.015;
+      const cardFree = getCardEffect('free_upgrade_chance');
+      return inRunFree + permFree + cardFree;
+    }
+    case 'interest_rate': {
+      const inRunInterest = lvl * (upg?.increment || 0.01);
+      const permInterest = (state.workshopUpgrades?.['perm_interest_rate'] || 0) * 0.005;
+      const cardInterest = getCardEffect('compound_interest');
+      return inRunInterest + permInterest + cardInterest;
+    }
+
+    default:
+      return (upg?.baseValue || 0) + lvl * (upg?.increment || 1);
+  }
+}
+
+/**
+ * Universal Effective Delta Preview Calculator.
+ * Calculates what an upgrade will become if +amount levels are purchased.
+ */
+export function getLiveEffectiveDelta(
+  upgradeId: string,
+  amount: number,
+  upgrades: Upgrade[],
+  state: Partial<GameState>,
+  currentVal?: number
+): { nextValue: number; delta: number } {
+  const current = currentVal !== undefined ? currentVal : getLiveEffectiveUpgradeValue(upgradeId, upgrades, state);
+  const simulatedUpgrades = upgrades.map(u => u.id === upgradeId ? { ...u, level: u.level + amount } : u);
+  const nextValue = getLiveEffectiveUpgradeValue(upgradeId, simulatedUpgrades, state);
+  const delta = nextValue - current;
+  return { nextValue, delta };
+}
+
+/**
+ * Universal Single-Source Formatter for Upgrade & Workshop Values.
+ * Guarantees zero discrepancy in formatting across all cards, tiles, badges, and modals.
+ */
+export function formatUpgradeValue(upgradeId: string, val: number): string {
+  if (
+    upgradeId === 'crit_chance' ||
+    upgradeId === 'perm_crit_chance' ||
+    upgradeId === 'defense_percent' ||
+    upgradeId === 'perm_defense_percent' ||
+    upgradeId === 'thorns_percent' ||
+    upgradeId === 'perm_thorns' ||
+    upgradeId === 'life_steal' ||
+    upgradeId === 'perm_life_steal' ||
+    upgradeId === 'knockback_chance' ||
+    upgradeId === 'perm_knockback_chance' ||
+    upgradeId === 'multishot_chance' ||
+    upgradeId === 'perm_multishot_chance' ||
+    upgradeId === 'rapid_fire_chance' ||
+    upgradeId === 'perm_rapid_fire_chance' ||
+    upgradeId === 'bounce_shot_chance' ||
+    upgradeId === 'perm_bounce_shot_chance' ||
+    upgradeId === 'free_upgrade_chance' ||
+    upgradeId === 'perm_free_upgrade_chance' ||
+    upgradeId === 'plasma_barrier_chance' ||
+    upgradeId === 'perm_plasma_barrier_chance' ||
+    upgradeId === 'armor_pierce' ||
+    upgradeId === 'perm_armor_pierce' ||
+    upgradeId === 'interest_rate' ||
+    upgradeId === 'perm_interest_rate' ||
+    upgradeId === 'perm_recovery_package'
+  ) {
+    return `${(val * 100).toFixed(1)}%`;
+  }
+  if (
+    upgradeId === 'crit_multiplier' ||
+    upgradeId === 'perm_crit_multiplier' ||
+    upgradeId === 'perm_critical_surge' ||
+    upgradeId === 'cash_bonus' ||
+    upgradeId === 'perm_cash_mult' ||
+    upgradeId === 'shards_per_kill' ||
+    upgradeId === 'perm_shards_yield' ||
+    upgradeId === 'boss_damage' ||
+    upgradeId === 'perm_boss_damage' ||
+    upgradeId === 'cash_per_wave' ||
+    upgradeId === 'perm_supply_drop'
+  ) {
+    return `x${val.toFixed(2)}`;
+  }
+  if (upgradeId === 'attack_radius' || upgradeId === 'perm_range') {
+    return `${val.toFixed(0)}m`;
+  }
+  if (
+    upgradeId === 'shoot_speed' ||
+    upgradeId === 'perm_attack_speed' ||
+    upgradeId === 'hp_regen' ||
+    upgradeId === 'perm_hp_regen'
+  ) {
+    return `${val.toFixed(2)}/s`;
+  }
+  if (upgradeId === 'orbiting_orbs' || upgradeId === 'perm_orbiting_orbs') {
+    return `${Math.round(val)} Orbs`;
+  }
+  if (upgradeId === 'shards_per_wave' || upgradeId === 'perm_shards_per_wave') {
+    return `+${Math.round(val)} ✦`;
+  }
+  if (val >= 1000) {
+    return formatCurrency(val);
+  }
+  if (val % 1 === 0) return val.toFixed(0);
+  return val.toFixed(1);
+}
+
+/**
+ * Mapping between Permanent Workshop Upgrade ID and corresponding combat stat upgrade ID.
+ */
+export const WORKSHOP_TO_UPGRADE_MAP: Record<string, string> = {
+  perm_base_damage: 'damage_flat',
+  perm_attack_speed: 'shoot_speed',
+  perm_crit_chance: 'crit_chance',
+  perm_crit_multiplier: 'crit_multiplier',
+  perm_critical_surge: 'crit_multiplier',
+  perm_range: 'attack_radius',
+  perm_multishot_chance: 'multishot_chance',
+  perm_rapid_fire_chance: 'rapid_fire_chance',
+  perm_bounce_shot_chance: 'bounce_shot_chance',
+  perm_boss_damage: 'boss_damage',
+  perm_elite_slayer: 'boss_damage',
+  perm_armor_pierce: 'armor_pierce',
+  perm_base_hp: 'health_max',
+  perm_hp_regen: 'hp_regen',
+  perm_defense_percent: 'defense_percent',
+  perm_defense_absolute: 'defense_absolute',
+  perm_barrier_overcharge: 'defense_absolute',
+  perm_thorns: 'thorns_percent',
+  perm_life_steal: 'life_steal',
+  perm_knockback_chance: 'knockback_chance',
+  perm_plasma_barrier_chance: 'plasma_barrier_chance',
+  perm_orbiting_orbs: 'orbiting_orbs',
+  perm_cash_mult: 'cash_bonus',
+  perm_supply_drop: 'cash_per_wave',
+  perm_shards_per_wave: 'shards_per_wave',
+  perm_shards_yield: 'shards_per_kill',
+  perm_free_upgrade_chance: 'free_upgrade_chance',
+  perm_interest_rate: 'interest_rate',
+};
+
+/**
+ * Computes the player's TRUE live total effective stat value corresponding to any Workshop card,
+ * as well as the simulated value if +levelsToBuy are purchased.
+ */
+export function getWorkshopLiveEffectiveValue(
+  workshopId: string,
+  upgrades: Upgrade[] | undefined,
+  state: Partial<GameState>
+): { totalValue: number; formattedTotal: string; isStatMapped: boolean; upgradeId?: string } {
+  const safeUpgrades = (upgrades && upgrades.length > 0) 
+    ? upgrades 
+    : (state.upgrades && state.upgrades.length > 0)
+    ? state.upgrades
+    : UPGRADES_CONFIG.map(c => ({ ...c, level: 0 }));
+
+  const mappedUpgradeId = WORKSHOP_TO_UPGRADE_MAP[workshopId];
+  if (!mappedUpgradeId) {
+    return {
+      totalValue: 0,
+      formattedTotal: '',
+      isStatMapped: false,
+    };
+  }
+
+  const totalValue = getLiveEffectiveUpgradeValue(mappedUpgradeId, safeUpgrades, state);
+  const formattedTotal = formatUpgradeValue(mappedUpgradeId, totalValue);
+  return {
+    totalValue,
+    formattedTotal,
+    isStatMapped: true,
+    upgradeId: mappedUpgradeId,
+  };
+}
+
+/**
+ * Calculates current and next total effective value when purchasing +levelsToBuy in the Workshop.
+ */
+export function getWorkshopLiveEffectiveDelta(
+  workshopId: string,
+  levelsToBuy: number,
+  upgrades: Upgrade[] | undefined,
+  state: Partial<GameState>
+): {
+  currentTotal: number;
+  nextTotal: number;
+  delta: number;
+  formattedCurrentTotal: string;
+  formattedNextTotal: string;
+  formattedDelta: string;
+  isStatMapped: boolean;
+} {
+  const safeUpgrades = (upgrades && upgrades.length > 0) 
+    ? upgrades 
+    : (state.upgrades && state.upgrades.length > 0)
+    ? state.upgrades
+    : UPGRADES_CONFIG.map(c => ({ ...c, level: 0 }));
+
+  const mappedUpgradeId = WORKSHOP_TO_UPGRADE_MAP[workshopId];
+  if (!mappedUpgradeId) {
+    return {
+      currentTotal: 0,
+      nextTotal: 0,
+      delta: 0,
+      formattedCurrentTotal: '',
+      formattedNextTotal: '',
+      formattedDelta: '',
+      isStatMapped: false,
+    };
+  }
+
+  const currentTotal = getLiveEffectiveUpgradeValue(mappedUpgradeId, safeUpgrades, state);
+  const currentLvl = state.workshopUpgrades?.[workshopId] || 0;
+  const simulatedWorkshop = {
+    ...(state.workshopUpgrades || {}),
+    [workshopId]: currentLvl + levelsToBuy,
+  };
+  const simulatedState = {
+    ...state,
+    workshopUpgrades: simulatedWorkshop,
+  };
+  const nextTotal = getLiveEffectiveUpgradeValue(mappedUpgradeId, safeUpgrades, simulatedState);
+  const delta = nextTotal - currentTotal;
+
+  return {
+    currentTotal,
+    nextTotal,
+    delta,
+    formattedCurrentTotal: formatUpgradeValue(mappedUpgradeId, currentTotal),
+    formattedNextTotal: formatUpgradeValue(mappedUpgradeId, nextTotal),
+    formattedDelta: delta >= 0 ? `+${formatUpgradeValue(mappedUpgradeId, delta)}` : formatUpgradeValue(mappedUpgradeId, delta),
+    isStatMapped: true,
   };
 }
 

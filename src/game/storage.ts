@@ -76,7 +76,7 @@ export function getDefaultProgression(): SavedProgression {
   const initialCards: Record<string, PlayerCard> = {};
 
   return {
-    cash: 0,
+    cash: 40,
     cosmicShards: 0,
     gems: 50, // Starting gift gems
     cells: 0,

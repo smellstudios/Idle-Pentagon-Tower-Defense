@@ -21,6 +21,7 @@ import {
   calculatePlayerCombatStats,
   PlayerCombatStats,
   getBossArchetype,
+  SHARD_BOUNTY_BY_SHAPE,
 } from './constants';
 import { PopupManager } from './popups';
 import { soundEngine } from './sound';
@@ -493,6 +494,11 @@ export class Simulation {
           this.spawnTimer = 0;
         }
       } else {
+        const isEliteWave = this.state.wave % 10 === 5;
+        if (isEliteWave && this.waveEnemiesSpawned === 0) {
+          this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 76, '⚡ ELITE VANGUARD DETECTED ⚡', 0xf59e0b);
+          soundEngine.playCrit();
+        }
         // Regular enemy spawning up to wave quota
         if (this.waveEnemiesSpawned < this.waveEnemiesTotal && this.spawnTimer > baseSpawnInterval) {
           this.spawnEnemy(false);
@@ -597,11 +603,12 @@ export class Simulation {
           const rawDps = enemy.dps || 0;
           if (enemy.type === 'boss') hasBossContact = true;
 
-          // Per-enemy Defense % and Defense Absolute mitigation (Rule 5)
+          // Per-enemy Defense % and Defense Absolute mitigation
           const cappedDefPercent = Math.min(0.90, Math.max(0, playerStats.defensePercent || 0));
           const mitigatedDps = rawDps * (1 - cappedDefPercent);
-          // Anti-immortality safeguard: Guaranteed minimum 8% raw contact damage floor
-          const minDpsFloor = rawDps * 0.08;
+          // Anti-immortality safeguard: Guaranteed minimum scaled damage floor
+          const scaledHpFloor = (playerStats.effectiveMaxHp || 100) * (0.002 + this.state.wave * 0.0001);
+          const minDpsFloor = Math.max(1, rawDps * 0.10, scaledHpFloor);
           const netEnemyDamagePerSec = Math.max(minDpsFloor, mitigatedDps - (playerStats.defenseAbsolute || 0));
           totalNetContactDamage += netEnemyDamagePerSec * tickFraction;
 
@@ -647,6 +654,7 @@ export class Simulation {
         if (this.state.playerHp <= 0) {
           if (this.isHandlingDeath) return;
           this.isHandlingDeath = true;
+          console.info('[DEATH_LATCH] Contact kill transition initiated at wave', this.state.wave, 'HP:', this.state.playerHp, 'isHandlingDeath:', this.isHandlingDeath);
           this.state.isDead = true;
           this.state.playerHp = 0;
           this.state.isWaveActive = false;
@@ -657,6 +665,7 @@ export class Simulation {
           stateUpdate.tier = this.state.tier;
           stateUpdate.enemiesRemaining = 0;
           stateUpdate.activeBoss = null;
+          stateUpdate.cosmicShards = this.state.cosmicShards;
           this.clearAllEntities();
           this.damageTickTimer = 0;
           this.pendingStateUpdate = {};
@@ -2666,7 +2675,8 @@ export class Simulation {
         
         const cappedDefPercent = Math.min(0.90, Math.max(0, playerStats.defensePercent || 0));
         const mitigatedDps = finalRawDamage * (1 - cappedDefPercent);
-        const minDamageFloor = Math.max(0.5, finalRawDamage * 0.08);
+        const scaledHpFloor = (playerStats.effectiveMaxHp || 100) * (0.002 + wave * 0.0001);
+        const minDamageFloor = Math.max(1, finalRawDamage * 0.10, scaledHpFloor);
         const netDamage = Math.max(minDamageFloor, Number((mitigatedDps - (playerStats.defenseAbsolute || 0)).toFixed(2)));
 
         const newHp = Math.max(0, this.state.playerHp - netDamage);
@@ -2692,6 +2702,7 @@ export class Simulation {
 
           if (this.isHandlingDeath) return;
           this.isHandlingDeath = true;
+          console.info('[DEATH_LATCH] Bullet kill transition initiated at wave', this.state.wave, 'HP:', this.state.playerHp, 'isHandlingDeath:', this.isHandlingDeath);
           this.state.isDead = true;
           this.state.playerHp = 0;
           this.state.isWaveActive = false;
@@ -2703,6 +2714,7 @@ export class Simulation {
             tier: this.state.tier,
             enemiesRemaining: 0,
             activeBoss: null,
+            cosmicShards: this.state.cosmicShards,
           };
           this.clearAllEntities();
           this.pendingStateUpdate = {};
@@ -3079,18 +3091,18 @@ export class Simulation {
       }
 
       if (enemy.type === 'circle') {
-        // FULL REWORK: Orbit radius dynamically anchored inside player weapon attack range
-        // Seamlessly adapts when the player upgrades weapon attack range!
+        // Dynamic orbit radius anchored at 0.75x player weapon attack range (min 25px standoff)
         const playerAttackRadius = playerStats.attackRadius || ATTACK_RADIUS_CONFIG.default;
-        const maxAllowedOrbit = Math.max(playerRadius + 42, playerAttackRadius - 22);
-        const dynamicBaseOrbit = Math.max(playerRadius + 42, Math.min(playerAttackRadius * 0.72, maxAllowedOrbit));
+        const maxAllowedOrbit = Math.max(playerRadius + 25, playerAttackRadius - 25);
+        const dynamicBaseOrbit = Math.max(playerRadius + 25, Math.min(playerAttackRadius * 0.75, maxAllowedOrbit));
 
-        // Progressive continuous inward spiral over time (down to player fortress clearance ring)
+        // Wave-scaled inward spiral: 1.5 px/s * (1 + wave * 0.015)
+        const spiralSpeed = (1.5 / 60) * (1 + (this.state.wave || 1) * 0.015) * delta;
         (enemy as any).spiralInwardOffset = Math.min(
-          dynamicBaseOrbit - (playerRadius + 28),
-          ((enemy as any).spiralInwardOffset || 0) + 0.03 * delta
+          dynamicBaseOrbit - (playerRadius + 25),
+          ((enemy as any).spiralInwardOffset || 0) + spiralSpeed
         );
-        const effectiveOrbitRadius = Math.max(playerRadius + 28, dynamicBaseOrbit - (enemy as any).spiralInwardOffset);
+        const effectiveOrbitRadius = Math.max(playerRadius + 25, dynamicBaseOrbit - (enemy as any).spiralInwardOffset);
 
         const myShootRange = Math.max(effectiveOrbitRadius + 40, 180);
         const myCooldown = enemy.shootCooldownMs || 1600;
@@ -3434,23 +3446,30 @@ export class Simulation {
         this.enemiesDefeatedInRun++;
         this.waveEnemiesDefeated++;
 
+        // NON-RED SHAPE COSMIC SHARD BOUNTY: All non-red shapes grant real-time Cosmic Shards
+        if (enemy.type !== 'red_square' && !enemy.isAllied) {
+          const shardBounty = SHARD_BOUNTY_BY_SHAPE[enemy.type] || (enemy.type === 'boss' ? 12 : 1);
+          this.state.cosmicShards = (this.state.cosmicShards || 0) + shardBounty;
+          this.lastSyncedShards = this.state.cosmicShards;
+          this.pendingStateUpdate.cosmicShards = this.state.cosmicShards;
+          this.popupManager.spawnText(enemy.x, enemy.y - 18, `+✦${shardBounty}`, 0xa855f7);
+        }
+
         // REBALANCED PROGRESSION CURRENCY GAIN SYSTEM:
-        // Calibrated with four-stage progression to hit framework playtesting targets:
-        // Target: Wave 25 = ~1k cumulative cash, Wave 50 = ~10k cumulative cash, Wave 100 = ~100k+ cumulative cash
         const isBoss = enemy.type === 'boss';
         const wave = this.state.wave || 1;
 
         // Stage-based enemy kill bounties
         let waveDropScale = 1.0;
         if (wave <= 25) {
-          // Stage 1 (Waves 1-25): $1 per kill early, smoothly scaling
-          waveDropScale = 0.58 + (wave - 1) * 0.030;
+          // Stage 1 (Waves 1-25): $2–$4 per kill, ensuring sufficient purchasing power for new players
+          waveDropScale = 1.35 + (wave - 1) * 0.080;
         } else if (wave <= 50) {
-          // Stage 2 (Waves 26-50): Escalating from ~$2 to ~$8 per kill
-          waveDropScale = 1.30 + (wave - 25) * 0.25;
+          // Stage 2 (Waves 26-50): Escalating from ~$3 to ~$10 per kill
+          waveDropScale = 2.10 + (wave - 25) * 0.28;
         } else {
-          // Stage 3 & 4 (Waves 51+): Scaling into deep sectors ~$10 to ~$45+ per kill
-          waveDropScale = 7.55 + (wave - 50) * 0.68;
+          // Stage 3 & 4 (Waves 51+): Scaling into deep sectors ~$12 to ~$50+ per kill
+          waveDropScale = 8.50 + (wave - 50) * 0.75;
         }
 
         const tierRanges: Record<string, { min: number; max: number }> = {
@@ -4371,20 +4390,19 @@ export class Simulation {
     const tierCashMultiplier = getTierCashMultiplier(tier);
     const isBoss = WAVE_CONFIG.isBossWave(wave);
 
-    // Calibrated four-stage wave progression crate:
-    // Target metrics: Wave 25 cumulative ~1k cash, Wave 50 cumulative ~10k cash, Wave 100 cumulative ~100k+ cash
+    // Calibrated wave progression crate with strong early-game cash injection:
+    // Wave 1: +$20, Wave 2: +$25, Wave 5: +$40, Wave 8: +$55
     let baseCrate = 0;
     if (wave <= 25) {
-      // Stage 1 (Waves 1-25): Wave 1: ~$4, Wave 10: ~$13, Wave 25: ~$35
-      baseCrate = 3.5 + wave * 0.62 + Math.pow(wave, 1.25) * 0.20;
+      baseCrate = 15.0 + wave * 5.0 + Math.pow(wave, 1.15) * 0.5;
     } else if (wave <= 50) {
-      // Stage 2 (Waves 26-50): Wave 26: ~$37, Wave 50: ~$240
+      // Stage 2 (Waves 26-50): Wave 26: ~$150, Wave 50: ~$380
       const w2 = wave - 25;
-      baseCrate = 30 + w2 * 6.2 + Math.pow(w2, 1.65) * 0.88;
+      baseCrate = 140 + w2 * 8.5 + Math.pow(w2, 1.65) * 0.95;
     } else {
-      // Stage 3 & 4 (Waves 51+): Wave 75: ~$1,000, Wave 100: ~$2,500
+      // Stage 3 & 4 (Waves 51+): Wave 75: ~$1,200, Wave 100: ~$3,500
       const w3 = wave - 50;
-      baseCrate = 340 + w3 * 16.0 + Math.pow(w3, 1.85) * 0.95;
+      baseCrate = 450 + w3 * 18.0 + Math.pow(w3, 1.85) * 1.05;
     }
 
     const bossMultiplier = isBoss ? 1.5 : 1.0;
@@ -4420,8 +4438,8 @@ export class Simulation {
   private getWaveCompletionShardsBonus(wave: number): number {
     const upgBonus = this.upgrades.find(u => u.id === 'shards_per_wave')?.level || 0;
     const permShardsWave = this.state.workshopUpgrades?.['perm_shards_per_wave'] || 0;
-    const milestoneBonus = (wave % 10 === 0) ? 2 : 0;
-    return upgBonus + permShardsWave + milestoneBonus;
+    const milestoneBonus = (wave % 10 === 0) ? 5 : ((wave % 2 === 0) ? 1 : 0);
+    return 1 + upgBonus + permShardsWave + milestoneBonus;
   }
 
   private updateKillMissions(isBoss: boolean, cashEarned: number, onStateUpdate: (state: Partial<GameState>) => void, thornsDamage: number = 0) {
@@ -4521,8 +4539,9 @@ export class Simulation {
     this.playerRotation = 0;
     this.playerAngularVelocity = 0;
     this.pendingStateUpdate = {};
-    this.state.cash = 0;
-    this.lastSyncedCash = 0;
+    const startingCash = 40;
+    this.state.cash = startingCash;
+    this.lastSyncedCash = startingCash;
     this.lastSyncedShards = this.state.cosmicShards;
     this.lastSyncedCells = this.state.cells;
 
@@ -4536,6 +4555,19 @@ export class Simulation {
     this.state.isWaveActive = true;
     this.state.wave = startWave;
     this.state.activeBoss = null;
+
+    if (this.lastOnStateUpdate) {
+      this.lastOnStateUpdate({
+        isDead: false,
+        playerHp: adjustedMaxHp,
+        playerMaxHp: adjustedMaxHp,
+        isWaveActive: true,
+        wave: startWave,
+        cash: startingCash,
+        activeBoss: null,
+      });
+    }
+
     this.startWave();
   }
 
@@ -4591,7 +4623,10 @@ export class Simulation {
     this.lastSyncedCells = this.state.cells;
 
     // Determine wave and death state safely without rapid regression loops
-    const isNowDead = Boolean(state.isDead || this.state.isDead);
+    if (state.isDead === false) {
+      this.isHandlingDeath = false;
+    }
+    const isNowDead = state.isDead === false ? false : Boolean(state.isDead);
     const resolvedWave = state.isDead 
       ? (state.wave || 1) 
       : (state.wave === 1 ? 1 : Math.max(state.wave || 1, this.state.wave || 1));
