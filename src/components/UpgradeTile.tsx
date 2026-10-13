@@ -101,6 +101,11 @@ export const getUpgradeTileIcon = (id: string) => {
       return CosmicShardBonusIcon;
     case 'shards_per_wave':
       return CosmicShardsPerRoundIcon;
+    case 'free_damage_chance':
+      return Swords;
+    case 'free_defense_chance':
+      return Shield;
+    case 'free_utility_chance':
     case 'free_upgrade_chance':
       return RefreshCcw;
     case 'interest_rate':
@@ -169,6 +174,7 @@ export const UpgradeTile: React.FC<Props> = React.memo(({
       case 'bounce_shot_chance': return 'BOUNCE SHOT';
       case 'boss_damage': return 'BOSS BUSTER';
       case 'armor_pierce': return 'ARMOR PIERCE';
+      case 'free_damage_chance': return 'FREE DAMAGE';
       case 'health_max': return 'HEALTH';
       case 'hp_regen': return 'REGEN';
       case 'defense_percent': return 'DEFENSE %';
@@ -178,10 +184,12 @@ export const UpgradeTile: React.FC<Props> = React.memo(({
       case 'knockback_chance': return 'KNOCKBACK';
       case 'plasma_barrier_chance': return 'BARRIER';
       case 'orbiting_orbs': return 'ENERGY ORBS';
+      case 'free_defense_chance': return 'FREE DEFENSE';
       case 'cash_bonus': return 'CASH BONUS';
       case 'cash_per_wave': return 'WAVE SUPPLY';
       case 'shards_per_kill': return 'SHARDS/KILL';
       case 'shards_per_wave': return 'WAVE SHARDS';
+      case 'free_utility_chance': return 'FREE UTILITY';
       case 'free_upgrade_chance': return 'FREE UPGRADE';
       case 'interest_rate': return 'INTEREST';
       default: return upgrade.name.toUpperCase();
@@ -195,6 +203,13 @@ export const UpgradeTile: React.FC<Props> = React.memo(({
   // Concise benefit delta (+3 HP, +2.5 DMG, +0.25/s)
   const getBenefitPreview = (): string => {
     if (isMax) return 'MAX';
+    if (
+      upgrade.id === 'free_damage_chance' ||
+      upgrade.id === 'free_defense_chance' ||
+      upgrade.id === 'free_utility_chance'
+    ) {
+      return `+${(delta * 100).toFixed(2)}%`;
+    }
     if (
       upgrade.id === 'crit_chance' ||
       upgrade.id === 'defense_percent' ||

@@ -3845,24 +3845,65 @@ export class Simulation {
       }
     }
 
-    // FREE UPGRADE CARD & IN-RUN / WORKSHOP FREE UPGRADE CHANCE
-    const freeCard = this.state.cards?.['card_free_upgrade'];
-    const cardFreeChance = (freeCard && freeCard.isEquipped) ? (0.05 + (freeCard.level - 1) * 0.02) : 0;
-    const inRunFreeChance = (this.upgrades.find(u => u.id === 'free_upgrade_chance')?.level || 0) * 0.02;
-    const permFreeChance = (this.state.workshopUpgrades?.['perm_free_upgrade_chance'] || 0) * 0.015;
-    const totalFreeChance = cardFreeChance + inRunFreeChance + permFreeChance;
-    if (totalFreeChance > 0 && Math.random() < totalFreeChance) {
-      const eligibleUpgrades = this.upgrades.filter(u => u.level < u.maxLevel);
-      if (eligibleUpgrades.length > 0) {
-        const chosenUpg = eligibleUpgrades[Math.floor(Math.random() * eligibleUpgrades.length)];
+    // --- TRIPLE-TRACK SECTIONAL FREE UPGRADES (0.25% per level each) ---
+    // 1. FREE DAMAGE UPGRADE ROLL (Damage Group, e.g. Range, Damage, Attack Speed, Multishot...)
+    const inRunFreeDamageLvl = this.upgrades.find(u => u.id === 'free_damage_chance')?.level || 0;
+    const permFreeDamageLvl = this.state.workshopUpgrades?.['perm_free_damage_chance'] || 0;
+    const freeDamageChance = inRunFreeDamageLvl * 0.0025 + permFreeDamageLvl * 0.0025;
+    if (freeDamageChance > 0 && Math.random() < freeDamageChance) {
+      const eligibleDamage = this.upgrades.filter(u => u.group === 'Damage' && u.level < u.maxLevel);
+      if (eligibleDamage.length > 0) {
+        const chosenUpg = eligibleDamage[Math.floor(Math.random() * eligibleDamage.length)];
         chosenUpg.level += 1;
-        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 100, `✨ FREE UPGRADE: ${chosenUpg.name}!`, 0x38bdf8);
+        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 120, `✨ FREE DAMAGE UPGRADE: ${chosenUpg.name} (+1)!`, 0xf43f5e);
         soundEngine.playLevelUp();
       } else {
-        const bonus = 15 * this.state.wave;
+        const bonus = 25 * this.state.wave;
         this.state.cash += bonus;
         this.lastSyncedCash = this.state.cash;
-        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 100, `+$${bonus} FREE BONUS!`, 0x38bdf8);
+        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 120, `+$${bonus} DAMAGE OVERFLOW!`, 0xf43f5e);
+      }
+    }
+
+    // 2. FREE DEFENSE UPGRADE ROLL (Health / Defense Group, e.g. Fortress Health, Regen, Defense %, Thorns...)
+    const inRunFreeDefenseLvl = this.upgrades.find(u => u.id === 'free_defense_chance')?.level || 0;
+    const permFreeDefenseLvl = this.state.workshopUpgrades?.['perm_free_defense_chance'] || 0;
+    const freeDefenseChance = inRunFreeDefenseLvl * 0.0025 + permFreeDefenseLvl * 0.0025;
+    if (freeDefenseChance > 0 && Math.random() < freeDefenseChance) {
+      const eligibleDefense = this.upgrades.filter(u => u.group === 'Health' && u.level < u.maxLevel);
+      if (eligibleDefense.length > 0) {
+        const chosenUpg = eligibleDefense[Math.floor(Math.random() * eligibleDefense.length)];
+        chosenUpg.level += 1;
+        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 95, `✨ FREE DEFENSE UPGRADE: ${chosenUpg.name} (+1)!`, 0x10b981);
+        soundEngine.playLevelUp();
+      } else {
+        const bonus = 25 * this.state.wave;
+        this.state.cash += bonus;
+        this.lastSyncedCash = this.state.cash;
+        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 95, `+$${bonus} DEFENSE OVERFLOW!`, 0x10b981);
+      }
+    }
+
+    // 3. FREE UTILITY UPGRADE ROLL (Utility Group, e.g. Cash Bonus, Supply Drop, Shards...)
+    const inRunFreeUtilityLvl = (this.upgrades.find(u => u.id === 'free_utility_chance')?.level || 0) +
+      (this.upgrades.find(u => u.id === 'free_upgrade_chance')?.level || 0);
+    const permFreeUtilityLvl = (this.state.workshopUpgrades?.['perm_free_utility_chance'] || 0) +
+      (this.state.workshopUpgrades?.['perm_free_upgrade_chance'] || 0);
+    const freeCard = this.state.cards?.['card_free_upgrade'];
+    const cardFreeChance = (freeCard && freeCard.isEquipped) ? (0.05 + (freeCard.level - 1) * 0.02) : 0;
+    const freeUtilityChance = inRunFreeUtilityLvl * 0.0025 + permFreeUtilityLvl * 0.0025 + cardFreeChance;
+    if (freeUtilityChance > 0 && Math.random() < freeUtilityChance) {
+      const eligibleUtility = this.upgrades.filter(u => u.group === 'Utility' && u.level < u.maxLevel);
+      if (eligibleUtility.length > 0) {
+        const chosenUpg = eligibleUtility[Math.floor(Math.random() * eligibleUtility.length)];
+        chosenUpg.level += 1;
+        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 70, `✨ FREE UTILITY UPGRADE: ${chosenUpg.name} (+1)!`, 0x38bdf8);
+        soundEngine.playLevelUp();
+      } else {
+        const bonus = 25 * this.state.wave;
+        this.state.cash += bonus;
+        this.lastSyncedCash = this.state.cash;
+        this.popupManager.spawnText(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 70, `+$${bonus} UTILITY OVERFLOW!`, 0x38bdf8);
       }
     }
 

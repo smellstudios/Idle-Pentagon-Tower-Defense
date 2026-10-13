@@ -144,6 +144,11 @@ const getUpgradeIcon = (id: string) => {
       return { icon: CosmicShardBonusIcon, color: 'text-purple-400', bg: 'bg-purple-950/60', border: 'border-purple-500/40', glow: 'shadow-[0_0_16px_rgba(168,85,247,0.45)]' };
     case 'perm_shards_per_wave':
       return { icon: CosmicShardsPerRoundIcon, color: 'text-violet-400', bg: 'bg-violet-950/60', border: 'border-violet-500/40', glow: 'shadow-[0_0_16px_rgba(139,92,246,0.45)]' };
+    case 'perm_free_damage_chance':
+      return { icon: Swords, color: 'text-rose-400', bg: 'bg-rose-950/60', border: 'border-rose-500/40', glow: 'shadow-[0_0_12px_rgba(244,63,94,0.3)]' };
+    case 'perm_free_defense_chance':
+      return { icon: Shield, color: 'text-emerald-400', bg: 'bg-emerald-950/60', border: 'border-emerald-500/40', glow: 'shadow-[0_0_12px_rgba(16,185,129,0.3)]' };
+    case 'perm_free_utility_chance':
     case 'perm_free_upgrade_chance':
       return { icon: RefreshCcw, color: 'text-teal-400', bg: 'bg-teal-950/60', border: 'border-teal-500/40', glow: 'shadow-[0_0_12px_rgba(20,184,166,0.3)]' };
     case 'perm_interest_rate':

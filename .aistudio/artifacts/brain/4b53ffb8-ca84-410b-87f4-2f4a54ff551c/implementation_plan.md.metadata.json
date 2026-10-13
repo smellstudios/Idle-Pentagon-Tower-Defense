@@ -1,6 +1,6 @@
 {
-  "summary": "Revised implementation plan incorporating user refinements:\n1. Procedural 128x128 pure-white enemy texture atlas with sprite.tint and preserved enemyPools structure.\n2. Relative LOD distance threshold based on playerAttackRadius + 90px.\n3. Fully pre-warmed 400-sprite projectile pool on init with zero runtime growth.\n4. Multi-tier adaptive governor (18.5ms / 15.0ms) coupled to enemy LOD staggering.\n5. Strict preservation of 100% visual identity and geometry across all 15 enemy shapes and bosses.\n6. Sequential 6-stage implementation workflow with clear testing checkpoints.",
-  "updatedAt": "2026-10-13T07:23:14.741414711Z",
+  "summary": "Implementation plan for:\n1. Three purchaseable & upgradeable Free Upgrade stats (Free Damage, Free Defense, Free Utilities) granting +0.25% per level, rolling at wave end with explicit announcements.\n2. Complete Settings UI overhaul and removal of the projectile setting inside Fire Protocol in the Gameplay settings tab.\n3. Simplified, consistent, and reliable Death Summary / Game Over UI.\n4. Reworked pure wave and tier Boss scaling without player DPS rubberbanding.",
+  "updatedAt": "2026-10-13T07:54:47.711461453Z",
   "requestFeedback": true,
   "userFacing": true
 }

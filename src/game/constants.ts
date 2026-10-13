@@ -381,7 +381,7 @@ export function getEnemyWaveStats(
   type: string,
   wave: number,
   tier: number = 1,
-  playerStats?: PlayerCombatStatsSummary
+  _playerStats?: PlayerCombatStatsSummary
 ): { hp: number; dps: number } {
   // Harder tiers scale exponentially to support all tiers accurately
   const tierHpMult = Math.pow(1.50 + (tier - 1) * 0.15, tier - 1);
@@ -392,49 +392,33 @@ export function getEnemyWaveStats(
   const hpMultiplier = stageHpMult * tierHpMult;
 
   // Contact DPS scaling modulated by the current stage progression factor
-  const stageInfo = getStageScaling(wave);
   const stageDpsMult = calculateFourStageMultiplier(wave, 0.022);
   const dpsMultiplier = stageDpsMult * tierDpsMult;
 
-  // Dynamic player stat scaling:
-  const baseBaselineDps = 16.5;
-  const effectivePlayerDps = playerStats?.dps ?? (
-    ((playerStats?.damage ?? 15) * (playerStats?.fireRate ?? 1.0)) *
-    (1 + (playerStats?.critChance ?? 0.05) * ((playerStats?.critMultiplier ?? 1.5) - 1))
-  );
-  const effectiveMaxHp = playerStats?.effectiveMaxHp ?? 100;
-  const playerHpRatio = Math.max(1.0, effectiveMaxHp / 100);
-  const playerDefAbs = playerStats?.defenseAbsolute ?? 0;
-
   if (type === 'boss') {
-    const baseBossHP = 280;
-    const baseBossDPS = 3.2;
+    // Pure wave and tier formula: deterministic encounter health based on wave & tier difficulty.
+    // Zero player DPS rubberbanding — overpowered player builds can genuinely overpower and melt bosses!
+    const baseBossHP = 320;
+    const baseBossDPS = 3.6;
 
-    // Boss scales with player DPS to guarantee a tense 6 - 14 second encounter
-    const bossTimeToKillTargetSec = 6.0 + Math.min(8.0, (wave - 1) * 0.25);
-    const playerDpsBonus = Math.max(0, (effectivePlayerDps - baseBaselineDps)) * bossTimeToKillTargetSec * Math.pow(1.08, tier - 1);
-
-    // Boss DPS scales with player HP and defense so it can overcome defense barriers
-    const playerDefensePenetration = Math.max(0, playerDefAbs * 0.60);
-    const bossDpsScale = (baseBossDPS * dpsMultiplier) * Math.pow(playerHpRatio, 0.32) + playerDefensePenetration;
+    const bossHp = Math.round(baseBossHP * hpMultiplier);
+    const bossDps = Number((baseBossDPS * dpsMultiplier).toFixed(2));
 
     return {
-      hp: Math.round(baseBossHP * hpMultiplier + playerDpsBonus),
-      dps: Number(bossDpsScale.toFixed(2)),
+      hp: bossHp,
+      dps: bossDps,
     };
   }
 
   const base = ENEMY_BASE_STATS[type as keyof typeof ENEMY_BASE_STATS] || ENEMY_BASE_STATS.red_square;
 
-  // Regular wave foes take proportional chunk of player damage based on archetype weight
-  const foeWeight = base.baseHP / 14;
-  const wavePlayerHpBonus = Math.max(0, (effectivePlayerDps - baseBaselineDps)) * 0.15 * foeWeight * Math.pow(1.04, tier - 1);
-  const foeDefensePenetration = Math.max(0, playerDefAbs * 0.20);
-  const foeDpsScale = (base.baseContactDPS * dpsMultiplier) * Math.pow(playerHpRatio, 0.20) + foeDefensePenetration;
+  // Regular wave foes also scale purely with wave stage and tier, no dynamic damage rubberbanding
+  const foeHp = Math.max(1, Math.round(base.baseHP * hpMultiplier));
+  const foeDps = Number((base.baseContactDPS * dpsMultiplier).toFixed(2));
 
   return {
-    hp: Math.max(1, Math.round(base.baseHP * hpMultiplier + wavePlayerHpBonus)),
-    dps: Number(foeDpsScale.toFixed(2)),
+    hp: foeHp,
+    dps: foeDps,
   };
 }
 
@@ -860,6 +844,19 @@ export const UPGRADES_CONFIG = [
     unit: '%',
     description: '+2% Armor Penetration against armored foes and bosses',
   },
+  {
+    id: 'free_damage_chance',
+    name: 'Free Damage',
+    group: 'Damage' as const,
+    unlockTier: 1,
+    baseValue: 0,
+    increment: 0.0025,
+    costGrowth: 1.20,
+    baseCost: 65,
+    maxLevel: 100,
+    unit: '%',
+    description: '+0.25% Chance per wave to receive a free random Damage upgrade (e.g. Damage, Attack Speed, Range...)',
+  },
 
   // --- DEFENSE GROUP ---
   {
@@ -979,6 +976,19 @@ export const UPGRADES_CONFIG = [
     unit: 'Orbs',
     description: 'Summons energy orbs orbiting the Pentagon that instantly vaporize normal enemies',
   },
+  {
+    id: 'free_defense_chance',
+    name: 'Free Defense',
+    group: 'Health' as const,
+    unlockTier: 1,
+    baseValue: 0,
+    increment: 0.0025,
+    costGrowth: 1.20,
+    baseCost: 60,
+    maxLevel: 100,
+    unit: '%',
+    description: '+0.25% Chance per wave to receive a free random Defense upgrade (e.g. Health, Regen, Defense %, Thorns...)',
+  },
 
   // --- UTILITY GROUP ---
   {
@@ -1034,17 +1044,30 @@ export const UPGRADES_CONFIG = [
     description: '+1 Cosmic Shard earned on wave milestone completion',
   },
   {
+    id: 'free_utility_chance',
+    name: 'Free Utilities',
+    group: 'Utility' as const,
+    unlockTier: 1,
+    baseValue: 0,
+    increment: 0.0025,
+    costGrowth: 1.20,
+    baseCost: 55,
+    maxLevel: 100,
+    unit: '%',
+    description: '+0.25% Chance per wave to receive a free random Utility upgrade (e.g. Cash Bonus, Supply Drop, Shards...)',
+  },
+  {
     id: 'free_upgrade_chance',
     name: 'Free Upgrade Chance',
     group: 'Utility' as const,
     unlockTier: 2,
     baseValue: 0,
-    increment: 0.02,
-    costGrowth: 1.23,
+    increment: 0.0025,
+    costGrowth: 1.20,
     baseCost: 60,
-    maxLevel: 75,
+    maxLevel: 100,
     unit: '%',
-    description: '+2% Chance to receive a free random stat upgrade each wave',
+    description: '+0.25% Chance per wave to receive a free random stat upgrade each wave',
   },
   {
     id: 'interest_rate',
@@ -1210,6 +1233,18 @@ export const WORKSHOP_CONFIG = [
     unit: '%',
     description: 'Permanently grants starting Armor Penetration against armored foes (+2.0% per level).',
   },
+  {
+    id: 'perm_free_damage_chance',
+    name: 'Free Damage Chance',
+    category: 'Attack' as const,
+    unlockTier: 1,
+    baseCost: 35,
+    costGrowth: 1.40,
+    increment: 0.0025,
+    statName: 'Free Damage Chance',
+    unit: '%',
+    description: 'Permanently grants a +0.25% chance per level to earn a free random Damage upgrade each wave.',
+  },
 
   // --- DEFENSE ---
   {
@@ -1344,6 +1379,18 @@ export const WORKSHOP_CONFIG = [
     unit: 'Orbs',
     description: 'Permanently grants starting orbiting energy defense orbs that vaporize regular enemies (+1 orb per level).',
   },
+  {
+    id: 'perm_free_defense_chance',
+    name: 'Free Defense Chance',
+    category: 'Defense' as const,
+    unlockTier: 1,
+    baseCost: 35,
+    costGrowth: 1.40,
+    increment: 0.0025,
+    statName: 'Free Defense Chance',
+    unit: '%',
+    description: 'Permanently grants a +0.25% chance per level to earn a free random Defense upgrade each wave.',
+  },
 
   // --- UTILITY ---
   {
@@ -1395,16 +1442,28 @@ export const WORKSHOP_CONFIG = [
     description: 'Permanently awards extra Cosmic Shards upon completing wave milestones (+1 Shard per level).',
   },
   {
+    id: 'perm_free_utility_chance',
+    name: 'Free Utilities Chance',
+    category: 'Utility' as const,
+    unlockTier: 1,
+    baseCost: 30,
+    costGrowth: 1.40,
+    increment: 0.0025,
+    statName: 'Free Utilities Chance',
+    unit: '%',
+    description: 'Permanently grants a +0.25% chance per level to earn a free random Utility upgrade each wave.',
+  },
+  {
     id: 'perm_free_upgrade_chance',
     name: 'Free Upgrade Chance',
     category: 'Utility' as const,
     unlockTier: 2,
     baseCost: 35,
     costGrowth: 1.45,
-    increment: 0.015,
+    increment: 0.0025,
     statName: 'Free Upgrade Chance',
     unit: '%',
-    description: 'Permanently grants a +1.5% chance per level to earn a free random stat upgrade each wave.',
+    description: 'Permanently grants a +0.25% chance per level to earn a free random stat upgrade each wave.',
   },
   {
     id: 'perm_interest_rate',
@@ -3775,9 +3834,25 @@ export function getLiveEffectiveUpgradeValue(
       const permShardsWave = (state.workshopUpgrades?.['perm_shards_per_wave'] || 0);
       return 1 + inRunShardsWave + permShardsWave;
     }
+    case 'free_damage_chance': {
+      const inRun = lvl * (upg?.increment || 0.0025);
+      const perm = (state.workshopUpgrades?.['perm_free_damage_chance'] || 0) * 0.0025;
+      return inRun + perm;
+    }
+    case 'free_defense_chance': {
+      const inRun = lvl * (upg?.increment || 0.0025);
+      const perm = (state.workshopUpgrades?.['perm_free_defense_chance'] || 0) * 0.0025;
+      return inRun + perm;
+    }
+    case 'free_utility_chance': {
+      const inRun = lvl * (upg?.increment || 0.0025);
+      const perm = (state.workshopUpgrades?.['perm_free_utility_chance'] || 0) * 0.0025;
+      const cardFree = getCardEffect('free_upgrade_chance');
+      return inRun + perm + cardFree;
+    }
     case 'free_upgrade_chance': {
-      const inRunFree = lvl * (upg?.increment || 0.02);
-      const permFree = (state.workshopUpgrades?.['perm_free_upgrade_chance'] || 0) * 0.015;
+      const inRunFree = lvl * (upg?.increment || 0.0025);
+      const permFree = (state.workshopUpgrades?.['perm_free_upgrade_chance'] || 0) * 0.0025;
       const cardFree = getCardEffect('free_upgrade_chance');
       return inRunFree + permFree + cardFree;
     }
@@ -3816,6 +3891,16 @@ export function getLiveEffectiveDelta(
  * Guarantees zero discrepancy in formatting across all cards, tiles, badges, and modals.
  */
 export function formatUpgradeValue(upgradeId: string, val: number): string {
+  if (
+    upgradeId === 'free_damage_chance' ||
+    upgradeId === 'perm_free_damage_chance' ||
+    upgradeId === 'free_defense_chance' ||
+    upgradeId === 'perm_free_defense_chance' ||
+    upgradeId === 'free_utility_chance' ||
+    upgradeId === 'perm_free_utility_chance'
+  ) {
+    return `${(val * 100).toFixed(2)}%`;
+  }
   if (
     upgradeId === 'crit_chance' ||
     upgradeId === 'perm_crit_chance' ||
@@ -3914,7 +3999,10 @@ export const WORKSHOP_TO_UPGRADE_MAP: Record<string, string> = {
   perm_supply_drop: 'cash_per_wave',
   perm_shards_per_wave: 'shards_per_wave',
   perm_shards_yield: 'shards_per_kill',
-  perm_free_upgrade_chance: 'free_upgrade_chance',
+  perm_free_damage_chance: 'free_damage_chance',
+  perm_free_defense_chance: 'free_defense_chance',
+  perm_free_utility_chance: 'free_utility_chance',
+  perm_free_upgrade_chance: 'free_utility_chance',
   perm_interest_rate: 'interest_rate',
 };
 
