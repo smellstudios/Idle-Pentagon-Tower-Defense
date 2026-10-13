@@ -462,7 +462,7 @@ export class Renderer {
     rockets: Array<{ x: number; y: number; angle: number; trail: Array<{ x: number; y: number; alpha: number }> }>;
     explosions: Array<{ x: number; y: number; radius: number; maxRadius: number; color: number; alpha: number }>;
     laserSweep: { active: boolean; currentAngle: number; startAngle: number; endAngle: number; radius: number; progress: number } | null;
-    mortars: Array<{ x: number; y: number; radius: number; progress: number; isLanding: boolean }>;
+    mortars: Array<{ x: number; y: number; radius: number; progress?: number; timerMs?: number; maxTimerMs?: number; isLanding?: boolean }>;
     deflections: Array<{ x: number; y: number; radius: number; alpha: number }>;
     lightningArcs?: Array<{ x1: number; y1: number; x2: number; y2: number; alpha: number; color?: number }>;
     poisonClouds?: Array<{ x: number; y: number; radius: number; lifeMs: number; maxLifeMs: number }>;
@@ -474,16 +474,17 @@ export class Renderer {
 
     // 1. Mortar Ground Reticles
     for (const m of params.mortars) {
-      const pulseAlpha = 0.3 + 0.5 * (1 - m.progress);
+      const progress = m.progress !== undefined ? m.progress : (m.timerMs !== undefined && m.maxTimerMs ? m.timerMs / m.maxTimerMs : 0);
+      const pulseAlpha = 0.3 + 0.5 * (1 - progress);
       
       // Outer warning radius
       this.specialEffectsGraphics
         .circle(m.x, m.y, m.radius)
         .stroke({ color: 0xef4444, width: 2, alpha: pulseAlpha })
-        .fill({ color: 0xef4444, alpha: 0.12 * (1 - m.progress) });
+        .fill({ color: 0xef4444, alpha: 0.12 * (1 - progress) });
 
       // Countdown inner ring
-      const innerR = Math.max(4, m.radius * (1 - m.progress));
+      const innerR = Math.max(4, m.radius * (1 - progress));
       this.specialEffectsGraphics
         .circle(m.x, m.y, innerR)
         .stroke({ color: 0xfbbf24, width: 1.5, alpha: 0.8 });

@@ -35,7 +35,7 @@ interface Props {
 
 const CARDS_PER_PAGE = 3;
 
-export const UpgradePanel: React.FC<Props> = ({ 
+export const UpgradePanel: React.FC<Props> = React.memo(({ 
   upgrades, 
   gameState, 
   onBuy, 
@@ -420,5 +420,5 @@ export const UpgradePanel: React.FC<Props> = ({
       </div>
     </div>
   );
-};
+});
 

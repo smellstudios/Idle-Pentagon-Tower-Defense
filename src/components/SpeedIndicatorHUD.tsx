@@ -15,7 +15,7 @@ interface SpeedIndicatorHUDProps {
   onOpenLab?: () => void;
 }
 
-export const SpeedIndicatorHUD: React.FC<SpeedIndicatorHUDProps> = ({
+export const SpeedIndicatorHUD: React.FC<SpeedIndicatorHUDProps> = React.memo(({
   gameSpeed,
   labResearchLevels = {},
   onSetGameSpeed,
@@ -285,4 +285,4 @@ export const SpeedIndicatorHUD: React.FC<SpeedIndicatorHUDProps> = ({
       )}
     </div>
   );
-};
+});

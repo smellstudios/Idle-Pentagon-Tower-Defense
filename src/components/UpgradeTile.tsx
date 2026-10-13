@@ -111,7 +111,7 @@ export const getUpgradeTileIcon = (id: string) => {
   }
 };
 
-export const UpgradeTile: React.FC<Props> = ({ 
+export const UpgradeTile: React.FC<Props> = React.memo(({ 
   upgrade, 
   allUpgrades,
   gameState, 
@@ -373,6 +373,6 @@ export const UpgradeTile: React.FC<Props> = ({
       </div>
     </div>
   );
-};
+});
 
 

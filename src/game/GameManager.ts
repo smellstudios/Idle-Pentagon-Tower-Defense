@@ -33,7 +33,9 @@ export class GameManager {
   private loop = (currentTime: number) => {
     if (!this.simulation || !this.renderer) return;
     
-    const delta = (currentTime - this.lastTime) / 16.67; // delta normalized to 60fps
+    // Delta normalized to 60fps with strict bounding to prevent skipping/warping on frame drops
+    const rawDelta = (currentTime - this.lastTime) / 16.67;
+    const delta = Math.min(Math.max(rawDelta, 0.1), 2.5);
     this.lastTime = currentTime;
 
     this.simulation.update(delta, currentTime, this.onStateUpdate);

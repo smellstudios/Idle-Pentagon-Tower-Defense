@@ -83,9 +83,15 @@ export const CardGachaModal: React.FC<Props> = ({
   const viewportWidth = 320;
   const pointerPos = viewportWidth / 2; // 160px
 
-  // Sound triggers
+  const lastTickTimeRef = useRef<number>(0);
+
+  // Sound triggers (with audio rate-limiting to prevent Web Audio oscillator flood)
   const playTickSound = (velocityRatio: number) => {
     try {
+      const now = performance.now();
+      if (now - lastTickTimeRef.current < 45) return; // Cap tick rate to ~22/sec max
+      lastTickTimeRef.current = now;
+
       const ctx = soundEngine.ensureContext();
       if (!ctx || soundEngine.getMuted()) return;
       const t = ctx.currentTime;
@@ -236,25 +242,56 @@ export const CardGachaModal: React.FC<Props> = ({
         stripRef.current.style.transform = `translate3d(${startX}px, 0, 0)`;
       }
 
-      const duration = 2200; // Snappy 2.2 seconds instead of 4.2
+      // Extended 4.6s duration (about 2.4s longer, suspenseful & arcade-grade)
+      const duration = 4600;
       const startTime = performance.now();
       const lastPlayedIndex = { current: -1 };
 
       let animationId: number;
 
+      // Smooth physical mechanical reel curve:
+      // Starts with v(0) = 0 so there is zero initial jerk or mounting frame-drop at the start!
+      // Phase 1 (0 to 0.12): Smooth sinusoidal spool-up acceleration from rest (v: 0 -> 1.0)
+      // Phase 2 (0.12 to 0.25): High-speed cruising spin (v = 1.0)
+      // Phase 3 (0.25 to 1.0): Long, buttery-smooth exponential quartic deceleration tapering gently to the exact stop
+      const getReelProgress = (p: number): number => {
+        if (p <= 0) return 0;
+        if (p >= 1) return 1;
+
+        const a = 0.12;
+        const A1 = (2 * a) / Math.PI; // ~0.07639
+        const b = 0.25;
+        const A2 = b - a; // 0.13
+        const c = 0.75;
+        const exp = 3.5;
+        const A3 = c / (exp + 1); // 0.75 / 4.5 = 0.16667
+        const totalArea = A1 + A2 + A3;
+
+        let currentArea = 0;
+        if (p <= a) {
+          currentArea = ((2 * a) / Math.PI) * (1 - Math.cos((p / a) * (Math.PI / 2)));
+        } else if (p <= b) {
+          currentArea = A1 + (p - a);
+        } else {
+          const w = (1 - p) / c;
+          currentArea = A1 + A2 + (c / (exp + 1)) * (1 - Math.pow(w, exp + 1));
+        }
+
+        return currentArea / totalArea;
+      };
+
       const tick = (now: number) => {
         const isSkipped = skipSpinRef.current;
         const elapsed = isSkipped ? duration : now - startTime;
-        const progress = Math.min(1, elapsed / duration);
+        const rawProgress = Math.min(1, elapsed / duration);
+        const progress = getReelProgress(rawProgress);
 
-        // Decelerate with smooth ease-out quintic curve
-        const easeOutQuint = 1 - Math.pow(1 - progress, 5);
-        let currentX = startX + (targetX - startX) * easeOutQuint;
+        let currentX = startX + (targetX - startX) * progress;
 
-        // Subtle final jitter (tactile spring/overshoot bounce at stop index)
-        if (progress > 0.90 && !isSkipped) {
-          const sub = (progress - 0.90) / 0.10; // 0 to 1
-          const spring = Math.sin(sub * Math.PI * 3.0) * 11 * Math.exp(-sub * 3.5);
+        // Subtle tactile magnetic spring/overshoot bounce at final lock-in
+        if (rawProgress > 0.94 && !isSkipped) {
+          const sub = (rawProgress - 0.94) / 0.06; // 0 to 1
+          const spring = Math.sin(sub * Math.PI * 2.5) * 8 * Math.exp(-sub * 3.8);
           currentX += spring;
         }
 
@@ -463,12 +500,18 @@ export const CardGachaModal: React.FC<Props> = ({
                     style={{ transform: `translate3d(${scrollX}px, 0, 0)` }}
                   >
                     {beltItems.map((item, idx) => {
+                      const isItemEquipped = useGameStore.getState().equippedCardIds.includes(item.id);
+                      const rCol = getRarityColor(item.rarity);
+                      const eqStyle = isItemEquipped ? getEquippedCardStyle(item.rarity) : null;
+
                       return (
                         <div
                           key={`${item.id}-${idx}`}
-                          className={`flex-shrink-0 w-20 h-[104px] rounded-xl border flex flex-col items-center justify-center p-1.5 text-center relative overflow-hidden bg-gradient-to-b ${getRarityColor(item.rarity).from} to-zinc-950/90 ${
-                            getRarityColor(item.rarity).border
-                          } ${getRarityColor(item.rarity).text}`}
+                          className={`flex-shrink-0 w-20 h-[104px] rounded-xl border flex flex-col items-center justify-center p-1.5 text-center relative overflow-hidden transition-all ${
+                            eqStyle 
+                              ? `${eqStyle.cardBg} ${eqStyle.borderClass} ${eqStyle.glow} ${eqStyle.ring} ${eqStyle.text}`
+                              : `bg-gradient-to-b ${rCol.from} to-zinc-950/90 ${rCol.border} ${rCol.text}`
+                          }`}
                         >
                           {/* Item Rarity Badge Accent */}
                           <div className={`absolute top-1 right-1 w-2 h-2 rounded-full border border-white/20 ${
@@ -483,18 +526,30 @@ export const CardGachaModal: React.FC<Props> = ({
                               : 'bg-zinc-600'
                           }`} />
 
+                          {isItemEquipped && (
+                            <div className="absolute top-1 left-1 px-1 py-0.2 rounded bg-amber-400/90 text-zinc-950 font-mono text-[5.5px] font-black uppercase tracking-tight">
+                              EQ
+                            </div>
+                          )}
+
                           {/* Icon Container */}
-                          <div className="w-9 h-9 rounded-lg bg-zinc-950/60 flex items-center justify-center mb-1 border border-white/5">
-                            <CardIcon icon={item.icon} className="w-5 h-5" />
+                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-1 border ${
+                            eqStyle ? eqStyle.artBg : 'bg-zinc-950/60 border-white/5'
+                          }`}>
+                            <CardIcon icon={item.icon} className={`w-5 h-5 ${eqStyle ? eqStyle.text : ''}`} />
                           </div>
 
                           {/* Compact Card Title */}
-                          <span className="text-[9px] font-mono font-black tracking-tight leading-tight uppercase w-full break-words px-0.5">
+                          <span className={`text-[9px] font-mono font-black tracking-tight leading-tight uppercase w-full break-words px-0.5 ${
+                            eqStyle ? eqStyle.text : ''
+                          }`}>
                             {item.name}
                           </span>
 
                           {/* Small rarity subtitle */}
-                          <span className="text-[7px] font-mono opacity-60 uppercase mt-0.5 tracking-wider">
+                          <span className={`text-[7px] font-mono uppercase mt-0.5 tracking-wider ${
+                            eqStyle ? eqStyle.accentText : 'opacity-60'
+                          }`}>
                             {item.rarity}
                           </span>
                         </div>
@@ -738,6 +793,7 @@ export const CardGachaModal: React.FC<Props> = ({
                   const selected = pulledCards[selectedCardIndex] || pulledCards[0];
                   const rCol = getRarityColor(selected.cardDef.rarity);
                   const isEquippedInDock = useGameStore.getState().equippedCardIds.includes(selected.cardDef.id);
+                  const eqStyle = isEquippedInDock ? getEquippedCardStyle(selected.cardDef.rarity) : null;
 
                   return (
                     <motion.div
@@ -745,19 +801,29 @@ export const CardGachaModal: React.FC<Props> = ({
                       initial={{ y: 8, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
                       transition={{ duration: 0.2 }}
-                      className="w-full min-w-0 max-w-full p-3 rounded-2xl border border-zinc-800 bg-zinc-900/30 text-left space-y-1.5 z-10 max-h-[175px] overflow-hidden"
+                      className={`w-full min-w-0 max-w-full p-3 rounded-2xl border transition-all duration-300 text-left space-y-1.5 z-10 max-h-[175px] overflow-hidden ${
+                        eqStyle 
+                          ? `${eqStyle.cardBg} ${eqStyle.borderClass} ${eqStyle.glow} ${eqStyle.ring}` 
+                          : 'border-zinc-800 bg-zinc-900/30'
+                      }`}
                     >
                       <div className="flex justify-between items-center gap-1">
                         <div className="flex items-center gap-1.5">
-                          <div className="w-6.5 h-6.5 rounded-lg bg-zinc-950 flex items-center justify-center border border-white/5">
-                            <CardIcon icon={selected.cardDef.icon} className="w-3.5 h-3.5 text-purple-300" />
+                          <div className={`w-6.5 h-6.5 rounded-lg flex items-center justify-center border ${
+                            eqStyle ? eqStyle.artBg : 'bg-zinc-950 border-white/5'
+                          }`}>
+                            <CardIcon icon={selected.cardDef.icon} className={`w-3.5 h-3.5 ${eqStyle ? eqStyle.text : 'text-purple-300'}`} />
                           </div>
                           <div>
-                            <h4 className="font-mono text-[11px] font-black text-white uppercase leading-tight">
+                            <h4 className={`font-mono text-[11px] font-black uppercase leading-tight ${
+                              eqStyle ? eqStyle.text : 'text-white'
+                            }`}>
                               {selected.cardDef.name}
                             </h4>
-                            <span className={`text-[7.5px] font-mono font-bold uppercase ${rCol.text}`}>
-                              {selected.cardDef.rarity}
+                            <span className={`text-[7.5px] font-mono font-bold uppercase ${
+                              eqStyle ? eqStyle.accentText : rCol.text
+                            }`}>
+                              {isEquippedInDock ? `⚡ EQUIPPED • ${selected.cardDef.rarity}` : selected.cardDef.rarity}
                             </span>
                           </div>
                         </div>
@@ -769,7 +835,9 @@ export const CardGachaModal: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      <p className="text-[9.5px] font-mono text-zinc-300 leading-normal bg-zinc-950/60 p-2 rounded-xl border border-white/5 max-h-[60px] overflow-y-auto">
+                      <p className={`text-[9.5px] font-mono leading-normal p-2 rounded-xl border max-h-[60px] overflow-y-auto ${
+                        eqStyle ? eqStyle.descBg : 'text-zinc-300 bg-zinc-950/60 border-white/5'
+                      }`}>
                         {selected.cardDef.description}
                       </p>
 
@@ -807,16 +875,25 @@ export const CardGachaModal: React.FC<Props> = ({
                 {/* Rarity Glow Border Presentation */}
                 {(() => {
                   const rCol = getRarityColor(pulledCardDef.rarity);
+                  const isCurrentlyEquipped = isEquipped || useGameStore.getState().equippedCardIds.includes(pulledCardDef.id);
+                  const eqStyle = isCurrentlyEquipped ? getEquippedCardStyle(pulledCardDef.rarity) : null;
+
                   return (
-                    <div className={`p-4 rounded-2xl border bg-gradient-to-b ${rCol.from} via-zinc-950 ${rCol.to} text-center relative overflow-hidden flex flex-col items-center justify-center transition-all duration-500 ${
-                      rCol.border
-                    } ${rCol.glow}`}>
+                    <div className={`p-4 rounded-2xl border transition-all duration-500 text-center relative overflow-hidden flex flex-col items-center justify-center ${
+                      eqStyle 
+                        ? `${eqStyle.cardBg} ${eqStyle.borderClass} ${eqStyle.glow} ${eqStyle.ring}` 
+                        : `bg-gradient-to-b ${rCol.from} via-zinc-950 ${rCol.to} ${rCol.border} ${rCol.glow}`
+                    }`}>
                       {/* Micro Rarity Text banner */}
-                      <span className={`text-[9px] font-mono font-bold tracking-widest uppercase px-2 py-0.5 rounded-full mb-2 ${rCol.badge} border`}>
-                        {pulledCardDef.rarity} Card Acquired
+                      <span className={`text-[9px] font-mono font-bold tracking-widest uppercase px-2.5 py-0.5 rounded-full mb-2 border ${
+                        eqStyle ? eqStyle.badge : `${rCol.badge} border`
+                      }`}>
+                        {isCurrentlyEquipped ? `⚡ EQUIPPED • ${pulledCardDef.rarity.toUpperCase()}` : `${pulledCardDef.rarity} Card Acquired`}
                       </span>
 
-                      <h3 className={`text-xl font-mono font-black tracking-wide drop-shadow-[0_0_8px_rgba(255,255,255,0.4)] ${rCol.text}`}>
+                      <h3 className={`text-xl font-mono font-black tracking-wide drop-shadow-[0_0_8px_rgba(255,255,255,0.4)] ${
+                        eqStyle ? eqStyle.text : rCol.text
+                      }`}>
                         {pulledCardDef.name}
                       </h3>
                     </div>
@@ -847,7 +924,11 @@ export const CardGachaModal: React.FC<Props> = ({
                   )}
                 </div>
 
-                <p className="text-xs font-mono text-zinc-300 bg-zinc-900/50 p-3 rounded-xl border border-white/5 leading-relaxed text-center">
+                <p className={`text-xs font-mono p-3 rounded-xl border leading-relaxed text-center ${
+                  (isEquipped || useGameStore.getState().equippedCardIds.includes(pulledCardDef.id))
+                    ? `${getEquippedCardStyle(pulledCardDef.rarity).descBg}`
+                    : 'text-zinc-300 bg-zinc-900/50 border-white/5'
+                }`}>
                   {pulledCardDef.description}
                 </p>
 

@@ -624,9 +624,11 @@ export const ATTACK_RADIUS_CONFIG = {
 };
 
 export const POPUP_CONFIG = {
-  damageDurationMs: 600,
-  cashDurationMs: 850,
-  floatDistance: 36,
+  damageDurationMs: 1400,
+  cashDurationMs: 1800,
+  statusDurationMs: 1800,
+  playerDamageDurationMs: 1800,
+  floatDistance: 40,
   maxPerFrame: {
     off: 0,
     low: 2,
@@ -635,13 +637,15 @@ export const POPUP_CONFIG = {
   },
   colors: {
     damage: 0xffffff,
-    damageStroke: 0x991b1b,
-    crit: 0xffd24d,
-    critStroke: 0x78350f,
-    cash: 0x4ade80,
-    cashStroke: 0x166534,
+    damageStroke: 0x0f172a,
+    crit: 0xfacc15,
+    critStroke: 0x451a03,
+    cash: 0x34d399,
+    cashStroke: 0x022c22,
     shard: 0xc084fc,
-    shardStroke: 0x581c87,
+    shardStroke: 0x3b0764,
+    playerDamage: 0xef4444,
+    playerDamageStroke: 0x450a0a,
   },
 };
 

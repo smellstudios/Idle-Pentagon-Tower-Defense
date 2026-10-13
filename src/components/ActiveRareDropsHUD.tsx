@@ -46,7 +46,7 @@ const getActiveCombos = (drops: ActiveRareDrop[]) => {
   return combos;
 };
 
-export const ActiveRareDropsHUD: React.FC<Props> = ({
+export const ActiveRareDropsHUD: React.FC<Props> = React.memo(({
   activeRareDrops,
   activeSynergyCards,
   synergySlots,
@@ -128,4 +128,4 @@ export const ActiveRareDropsHUD: React.FC<Props> = ({
       </div>
     </div>
   );
-};
+});

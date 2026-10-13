@@ -27,7 +27,7 @@ export class ImpactSpark {
   public active: boolean = false;
   public x: number = 0;
   public y: number = 0;
-  public color: number = 0x22c55e;
+  public color: number = 0x34d399;
   public elapsedMs: number = 0;
   public durationMs: number = 260;
 
@@ -52,9 +52,9 @@ export class ImpactSpark {
     const t = Math.min(1, this.elapsedMs / this.durationMs);
 
     this.graphics.clear();
-    const radius = 3 + t * 22;
+    const radius = 3 + t * 24;
     const alpha = 1 - t;
-    const strokeWidth = 3.5 * (1 - t);
+    const strokeWidth = 3 * (1 - t);
 
     // Flash ring
     this.graphics
@@ -90,8 +90,8 @@ export class PopupItem {
   public jitterX: number = 0;
   public driftX: number = 0;
   public elapsedMs: number = 0;
-  public durationMs: number = 600;
-  public floatDist: number = 36;
+  public durationMs: number = 1800;
+  public floatDist: number = 38;
   public baseScale: number = 1.0;
   public numericValue: number = 0;
   public cashValue: number = 0;
@@ -110,13 +110,14 @@ export class PopupItem {
     this.textSprite = new Text({
       text: '',
       style: {
-        fontFamily: 'monospace, "Courier New", Courier, sans-serif',
-        fontSize: 9,
-        fontWeight: 'bold',
+        fontFamily: '"JetBrains Mono", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace',
+        fontSize: 10,
+        fontWeight: '800',
         fill: 0xffffff,
-        stroke: { color: 0x000000, width: 2 },
+        stroke: { color: 0x000000, width: 2.8, join: 'round' },
       },
     });
+    this.textSprite.roundPixels = true;
     this.textSprite.anchor.set(0.5, 0.5);
     this.container.addChild(this.bgGraphics);
     this.container.addChild(this.textSprite);
@@ -130,7 +131,7 @@ export class PopupItem {
     this.startY = options.y;
     this.elapsedMs = 0;
     this.numericValue = initialNumeric;
-    
+
     this.cashValue = 0;
     this.shardValue = 0;
     this.isCritCash = options.isCrit || false;
@@ -142,13 +143,39 @@ export class PopupItem {
     if (this.type === 'stardust') this.cashValue = initialNumeric;
     if (this.type === 'shard') this.shardValue = initialNumeric;
 
-    this.durationMs = options.durationMs || (options.type === 'stardust' ? POPUP_CONFIG.cashDurationMs : options.type === 'shard' ? POPUP_CONFIG.cashDurationMs : options.type === 'player_damage' ? 900 : POPUP_CONFIG.damageDurationMs);
-    this.floatDist = options.type === 'critical' ? POPUP_CONFIG.floatDistance + 8 : (options.type === 'stardust' || options.type === 'shard' || options.type === 'player_damage' ? 28 : POPUP_CONFIG.floatDistance);
+    // Generous lingering lifecycles (1.4s to 1.8s) for maximum combat readability
+    if (options.durationMs) {
+      this.durationMs = options.durationMs;
+    } else if (this.type === 'stardust' || this.type === 'shard') {
+      this.durationMs = POPUP_CONFIG.cashDurationMs;
+    } else if (this.type === 'player_damage') {
+      this.durationMs = POPUP_CONFIG.playerDamageDurationMs;
+    } else if (this.type === 'text') {
+      this.durationMs = POPUP_CONFIG.statusDurationMs;
+    } else if (this.type === 'critical') {
+      this.durationMs = POPUP_CONFIG.damageDurationMs + 200;
+    } else {
+      this.durationMs = POPUP_CONFIG.damageDurationMs;
+    }
+
+    // Buoyant float distances
+    if (this.type === 'critical') {
+      this.floatDist = POPUP_CONFIG.floatDistance + 6;
+    } else if (this.type === 'stardust' || this.type === 'shard') {
+      this.floatDist = 38;
+    } else if (this.type === 'player_damage') {
+      this.floatDist = 34;
+    } else if (this.type === 'text') {
+      this.floatDist = 32;
+    } else {
+      this.floatDist = POPUP_CONFIG.floatDistance;
+    }
+
     this.container.rotation = 0;
 
-    // Divergent trajectories for damage popups
+    // Minimal horizontal jitter so text remains anchored and readable
     if (options.type === 'stardust' || options.type === 'shard') {
-      this.jitterX = options.type === 'stardust' ? -12 + (Math.random() * 8) : 12 - (Math.random() * 8);
+      this.jitterX = (Math.random() - 0.5) * 8;
       this.driftX = 0;
     } else if (options.type === 'player_damage') {
       this.jitterX = (Math.random() - 0.5) * 6;
@@ -156,10 +183,9 @@ export class PopupItem {
     } else if (options.type === 'text') {
       this.jitterX = 0;
       this.driftX = 0;
-      this.floatDist = 28;
     } else {
-      this.jitterX = -10 - Math.random() * 8;
-      this.driftX = -24 - Math.random() * 16;
+      this.jitterX = -8 - Math.random() * 8;
+      this.driftX = -16 - Math.random() * 12;
     }
 
     this.refreshVisuals(options.text);
@@ -181,89 +207,112 @@ export class PopupItem {
       this.numericValue = this.shardValue;
     }
 
-    // Reset stay duration partially to allow reading
-    this.elapsedMs = Math.min(this.elapsedMs, 150);
+    // Reset elapsedMs partially so player has full ~1.6s remaining window to read the combined total
+    this.elapsedMs = Math.min(this.elapsedMs, 200);
     this.refreshVisuals();
+    this.container.scale.set(this.baseScale * 1.25);
   }
 
-  private refreshVisuals(manualText?: string) {
+  public refreshVisuals(manualText?: string) {
     this.bgGraphics.clear();
 
     if (this.type === 'stardust' || this.type === 'shard') {
-      let displayText = "";
+      let displayText = '';
       if (this.cashValue > 0) displayText += `+$${formatCurrency(this.cashValue, this.useLegacyFormat)}`;
       if (this.shardValue > 0) {
-        if (displayText) displayText += " ";
+        if (displayText) displayText += ' ';
         displayText += `+${this.shardValue} 💠`;
       }
       if (this.isCritCash && this.cashValue > 0 && this.shardValue === 0) {
-        displayText += " CRIT!";
+        displayText += ' CRIT!';
       }
       if (this.bonusLabel && this.cashValue > 0 && this.shardValue === 0 && !this.isCritCash) {
         displayText += ` ${this.bonusLabel}`;
       }
 
       this.textSprite.text = displayText || manualText || '';
-      this.textSprite.style.fontSize = 10;
-      
-      // Determine style based on mix
+      this.textSprite.style.fontSize = 11;
+
+      // Minimalist crisp typography with high-contrast outlines (no chunky pill backgrounds)
       if (this.shardValue > 0 && this.cashValue > 0) {
-        this.textSprite.style.fill = 0xfef08a; // Light yellow mix
-        this.textSprite.style.stroke = { color: 0x422006, width: 2 };
-        
-        const badgeWidth = Math.max(50, this.textSprite.text.length * 8 + 12);
-        this.bgGraphics
-          .roundRect(-badgeWidth / 2, -10, badgeWidth, 20, 10)
-          .fill({ color: 0x1c1917, alpha: 0.9 })
-          .stroke({ color: 0xca8a04, width: 1.5 });
+        // Dual Currency
+        this.textSprite.style.fill = 0xfef08a; // Golden Yellow
+        this.textSprite.style.stroke = { color: 0x451a03, width: 3.0 };
       } else if (this.shardValue > 0) {
-        this.textSprite.style.fill = 0xf3e8ff;
-        this.textSprite.style.stroke = { color: 0x581c87, width: 2 };
-        const badgeWidth = Math.max(48, this.textSprite.text.length * 8 + 10);
-        this.bgGraphics
-          .roundRect(-badgeWidth / 2, -10, badgeWidth, 20, 10)
-          .fill({ color: 0x2e1065, alpha: 0.88 })
-          .stroke({ color: 0xa855f7, width: 1.5 });
+        // Shards alone
+        this.textSprite.style.fill = POPUP_CONFIG.colors.shard; // Electric Amethyst
+        this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.shardStroke, width: 2.8 };
       } else {
-        this.textSprite.style.fill = 0xa7f3d0;
-        this.textSprite.style.stroke = { color: 0x064e3b, width: 2 };
-        const badgeWidth = Math.max(40, this.textSprite.text.length * 7.5 + 10);
-        this.bgGraphics
-          .roundRect(-badgeWidth / 2, -10, badgeWidth, 20, 10)
-          .fill({ color: 0x022c22, alpha: 0.88 })
-          .stroke({ color: 0x10b981, width: 1.5 });
+        // Cash alone
+        if (this.isCritCash) {
+          this.textSprite.style.fill = POPUP_CONFIG.colors.crit;
+          this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.critStroke, width: 3.0 };
+        } else {
+          this.textSprite.style.fill = POPUP_CONFIG.colors.cash; // Mint Emerald
+          this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.cashStroke, width: 2.8 };
+        }
       }
-      this.baseScale = 1.1;
+      this.baseScale = 1.05;
     } else if (this.type === 'player_damage') {
       const formatted = formatCurrency(Math.max(0.1, Math.round(this.numericValue * 10) / 10));
-      this.textSprite.text = `-${formatted}`;
+      this.textSprite.text = `-${formatted} HP`;
       this.textSprite.style.fontSize = 11;
-      this.textSprite.style.fill = 0xff4d4f; // Danger Crimson
-      this.textSprite.style.stroke = { color: 0x450a0a, width: 2.5 };
-      const badgeWidth = Math.max(38, this.textSprite.text.length * 7.5 + 12);
-      this.bgGraphics
-        .roundRect(-badgeWidth / 2, -10, badgeWidth, 20, 6)
-        .fill({ color: 0x450a0a, alpha: 0.9 })
-        .stroke({ color: 0xef4444, width: 1.5 });
-      this.baseScale = 1.15;
+      this.textSprite.style.fill = POPUP_CONFIG.colors.playerDamage;
+      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.playerDamageStroke, width: 3.0 };
+      this.baseScale = 1.1;
     } else if (this.type === 'critical') {
-      this.textSprite.text = manualText || "";
+      this.textSprite.text = manualText || '';
       this.textSprite.style.fontSize = 11;
       this.textSprite.style.fill = POPUP_CONFIG.colors.crit;
-      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.critStroke, width: 2.5 };
-      this.baseScale = 1.15;
-    } else if (this.type === 'text') {
-      this.textSprite.text = manualText || "";
-      this.textSprite.style.fontSize = 10;
-      this.textSprite.style.fill = 0xffffff;
-      this.textSprite.style.stroke = { color: 0x000000, width: 2.5 };
+      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.critStroke, width: 3.0 };
       this.baseScale = 1.1;
+    } else if (this.type === 'text') {
+      const rawText = manualText || this.baseText || '';
+      this.textSprite.text = rawText;
+      this.textSprite.style.fontSize = 10;
+      this.applyAilmentTheme(rawText);
+      this.baseScale = 1.05;
     } else {
-      this.textSprite.text = manualText || "";
+      this.textSprite.text = manualText || '';
       this.textSprite.style.fontSize = 9;
       this.textSprite.style.fill = POPUP_CONFIG.colors.damage;
-      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.damageStroke, width: 2 };
+      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.damageStroke, width: 2.5 };
       this.baseScale = 1.0;
+    }
+  }
+
+  private applyAilmentTheme(text: string) {
+    const upper = text.toUpperCase();
+    if (upper.includes('POISON') || upper.includes('TOXIC') || upper.includes('SWAMP') || upper.includes('MIASMA')) {
+      this.textSprite.style.fill = 0x22c55e; // Biohazard Lime
+      this.textSprite.style.stroke = { color: 0x052e16, width: 2.8 };
+    } else if (upper.includes('DECAY')) {
+      this.textSprite.style.fill = 0x4ade80; // Toxic Green
+      this.textSprite.style.stroke = { color: 0x052e16, width: 2.8 };
+    } else if (upper.includes('SHRAPNEL') || upper.includes('BLEED') || upper.includes('GORE')) {
+      this.textSprite.style.fill = 0xf43f5e; // Crimson Gore
+      this.textSprite.style.stroke = { color: 0x4c0519, width: 2.8 };
+    } else if (upper.includes('CHAIN') || upper.includes('LIGHTNING') || upper.includes('ZAP') || upper.includes('EMP')) {
+      this.textSprite.style.fill = 0x22d3ee; // Cyber Cyan
+      this.textSprite.style.stroke = { color: 0x083344, width: 2.8 };
+    } else if (upper.includes('SHIELD') || upper.includes('BLOCK') || upper.includes('DEFLECT')) {
+      this.textSprite.style.fill = 0x38bdf8; // Sky Blue
+      this.textSprite.style.stroke = { color: 0x082f49, width: 2.8 };
+    } else if (upper.includes('CALAMITY') || upper.includes('VOID') || upper.includes('PHAS') || upper.includes('BLINK')) {
+      this.textSprite.style.fill = 0xc084fc; // Cosmic Purple
+      this.textSprite.style.stroke = { color: 0x3b0764, width: 2.8 };
+    } else if (upper.includes('GOLD') || upper.includes('BOUNTY') || upper.includes('LUCKY') || upper.includes('INTEREST')) {
+      this.textSprite.style.fill = 0xfacc15; // Golden Amber
+      this.textSprite.style.stroke = { color: 0x451a03, width: 2.8 };
+    } else if (upper.includes('CELL') || upper.includes('FUEL') || upper.includes('BIO')) {
+      this.textSprite.style.fill = 0x14b8a6; // Teal Cell
+      this.textSprite.style.stroke = { color: 0x042f2e, width: 2.8 };
+    } else if (upper.includes('HEAL') || upper.includes('RECOVERY') || upper.includes('LIFE')) {
+      this.textSprite.style.fill = 0x10b981; // Vital Emerald
+      this.textSprite.style.stroke = { color: 0x064e3b, width: 2.8 };
+    } else {
+      this.textSprite.style.fill = 0xf8fafc;
+      this.textSprite.style.stroke = { color: 0x0f172a, width: 2.8 };
     }
   }
 
@@ -274,19 +323,19 @@ export class PopupItem {
     if (isCrit && this.type !== 'critical') {
       this.type = 'critical';
       this.textSprite.style.fill = POPUP_CONFIG.colors.crit;
-      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.critStroke, width: 2.5 };
-      this.baseScale = 1.2;
+      this.textSprite.style.stroke = { color: POPUP_CONFIG.colors.critStroke, width: 3.0 };
+      this.baseScale = 1.15;
     }
-    // Maintain visibility and reset progress slightly so continuous damage sums smoothly
-    this.elapsedMs = Math.min(this.elapsedMs, 80);
-    this.container.scale.set(this.baseScale * 1.25);
+    // Refresh reading timer so accumulated numbers remain on screen
+    this.elapsedMs = Math.min(this.elapsedMs, 180);
+    this.container.scale.set(this.baseScale * 1.22);
   }
 
   public aggregatePlayerDamage(addedDamage: number) {
     this.numericValue += addedDamage;
     this.refreshVisuals();
-    this.elapsedMs = Math.min(this.elapsedMs, 100);
-    this.container.scale.set(this.baseScale * 1.2);
+    this.elapsedMs = Math.min(this.elapsedMs, 200);
+    this.container.scale.set(this.baseScale * 1.25);
   }
 
   public aggregateText(newText: string, colorHex?: number) {
@@ -296,11 +345,18 @@ export class PopupItem {
     } else if (newText.length > this.baseText.length) {
       this.baseText = newText;
     }
+
+    // Smart stacked badges: e.g. "☣️ POISON LINGER (x3)"
     this.textSprite.text = `${this.baseText} (x${this.hitCount})`;
     if (colorHex !== undefined) {
       this.textSprite.style.fill = colorHex;
+      this.textSprite.style.stroke = { color: 0x020617, width: 2.8 };
+    } else {
+      this.applyAilmentTheme(this.baseText);
     }
-    this.elapsedMs = Math.min(this.elapsedMs, 100);
+
+    // Refresh linger duration so player can see the stacked hit count
+    this.elapsedMs = Math.min(this.elapsedMs, 200);
     this.container.scale.set(this.baseScale * 1.25);
   }
 
@@ -310,57 +366,30 @@ export class PopupItem {
     this.elapsedMs += deltaMs;
     const progress = Math.min(1, this.elapsedMs / this.durationMs);
 
-    // CLEAN FLOAT & FADE ANIMATION FOR CASH, COSMIC SHARDS & PLAYER DAMAGE
-    if (this.type === 'stardust' || this.type === 'shard' || this.type === 'player_damage') {
-      const floatDist = 28; // ~0.3 inches
-      const easeOutQuad = 1 - (1 - progress) * (1 - progress);
+    // Smooth cubic ease-out upward glide
+    const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+    this.container.y = this.startY - easeOutCubic * this.floatDist;
+    this.container.x = this.startX + this.jitterX + (this.driftX !== 0 ? easeOutCubic * this.driftX : 0);
+    this.container.rotation = 0;
 
-      this.container.x = this.startX + this.jitterX;
-      this.container.y = this.startY - easeOutQuad * floatDist;
-      this.container.rotation = 0;
-
-      // Pop scale effect during first 150ms
-      if (this.elapsedMs < 150) {
-        const popT = this.elapsedMs / 150;
-        const popScale = 1 + Math.sin(popT * Math.PI) * (this.type === 'player_damage' ? 0.35 : 0.22);
-        this.container.scale.set(this.baseScale * popScale);
-      } else {
-        this.container.scale.set(this.baseScale);
-      }
-
-      // Smooth fade out in the second half of popup lifecycle
-      if (progress > 0.5) {
-        const fadeProgress = (progress - 0.5) / 0.5;
-        this.container.alpha = Math.max(0, 1 - fadeProgress);
-      } else {
-        this.container.alpha = 1.0;
-      }
-
-      if (progress >= 1) {
-        this.reset();
-        return false;
-      }
-      return true;
-    }
-
-    // Standard floating damage numbers
-    const easeOutQuad = 1 - (1 - progress) * (1 - progress);
-    this.container.y = this.startY - easeOutQuad * this.floatDist;
-    this.container.x = this.startX + this.jitterX + easeOutQuad * this.driftX + Math.sin(progress * Math.PI * 2) * 1.5;
-
+    // Elastic pop scale during first 140ms
     if (this.elapsedMs < 140) {
       const popT = this.elapsedMs / 140;
-      const popScale = 1 + Math.sin(popT * Math.PI) * 0.28;
+      const popIntensity = (this.type === 'critical' || this.type === 'player_damage') ? 0.30 : 0.22;
+      const popScale = 1 + Math.sin(popT * Math.PI) * popIntensity;
       this.container.scale.set(this.baseScale * popScale);
     } else {
       this.container.scale.set(this.baseScale);
     }
 
-    if (progress > 0.55) {
-      const fadeProgress = (progress - 0.55) / 0.45;
-      this.container.alpha = Math.max(0, 1 - fadeProgress);
+    // Extended high-readability curve (1.4s to 1.8s)
+    // 100% full solid opacity during the first 65% of lifecycle (~1.1s)
+    // Smooth quadratic ease-out fade in the final 35% of life
+    if (progress > 0.65) {
+      const fadeProgress = (progress - 0.65) / 0.35;
+      this.container.alpha = Math.max(0, 1 - fadeProgress * fadeProgress);
     } else {
-      this.container.alpha = 1;
+      this.container.alpha = 1.0;
     }
 
     if (progress >= 1) {
@@ -398,27 +427,25 @@ export class PopupManager {
   private activeItems: PopupItem[] = [];
   private impactSparks: ImpactSpark[] = [];
   private frameSpawnCount: number = 0;
-  private accumulatedDeltaMs: number = 0;
-  private readonly STEP_30FPS_MS: number = 33.33; // 30 FPS update interval
   public density: PopupDensity = 'high';
   public onCurrencyImpact?: (type: PopupType, amount: number) => void;
 
-  constructor(parent: Container, initialCapacity: number = 80) {
+  constructor(parent: Container, initialCapacity: number = 120) {
     this.rootContainer = new Container();
     parent.addChild(this.rootContainer);
 
     for (let i = 0; i < initialCapacity; i++) {
       const item = new PopupItem();
-      item.onImpact = (x, y, type, amount) => this.spawnImpact(x, y, type === 'stardust' ? 0x22c55e : 0xa855f7, type, amount);
+      item.onImpact = (x, y, type, amount) => this.spawnImpact(x, y, type === 'stardust' ? 0x34d399 : 0xc084fc, type, amount);
       item.onMultiImpact = (x, y, cash, shards) => {
-        if (cash > 0) this.spawnImpact(x, y, 0x22c55e, 'stardust', cash);
-        if (shards > 0) this.spawnImpact(x, y, 0xa855f7, 'shard', shards);
+        if (cash > 0) this.spawnImpact(x, y, 0x34d399, 'stardust', cash);
+        if (shards > 0) this.spawnImpact(x, y, 0xc084fc, 'shard', shards);
       };
       this.rootContainer.addChild(item.container);
       this.pool.push(item);
     }
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 20; i++) {
       this.impactSparks.push(new ImpactSpark(this.rootContainer));
     }
   }
@@ -446,7 +473,7 @@ export class PopupManager {
     if (item) return item;
 
     const newItem = new PopupItem();
-    newItem.onImpact = (x, y, type, amount) => this.spawnImpact(x, y, type === 'stardust' ? 0x22c55e : 0xa855f7, type, amount);
+    newItem.onImpact = (x, y, type, amount) => this.spawnImpact(x, y, type === 'stardust' ? 0x34d399 : 0xc084fc, type, amount);
     this.rootContainer.addChild(newItem.container);
     this.pool.push(newItem);
     return newItem;
@@ -456,32 +483,32 @@ export class PopupManager {
     return formatCurrency(value, useLegacyFormat);
   }
 
-  public spawnText(x: number, y: number, text: string, colorHex: number = 0xef4444): PopupItem | null {
+  public spawnText(x: number, y: number, text: string, colorHex?: number): PopupItem | null {
     if (this.density === 'off') return null;
 
     const cleanNewText = text.replace(/\s*\(x\d+\)$/, '');
 
-    // 1. Search for matching or nearby active text popup to aggregate/refresh
+    // 1. Search for matching or nearby active status popup to aggregate into stacked multiplier
     for (let i = this.activeItems.length - 1; i >= 0; i--) {
       const active = this.activeItems[i];
-      if (active.active && active.type === 'text' && active.elapsedMs < 550) {
+      if (active.active && active.type === 'text' && active.elapsedMs < 1200) {
         const dx = active.startX - x;
         const dy = active.startY - y;
         const distSq = dx * dx + dy * dy;
 
         const cleanExistingBase = active.baseText ? active.baseText.replace(/\s*\(x\d+\)$/, '') : active.textSprite.text.replace(/\s*\(x\d+\)$/, '');
 
-        // If same ailment or nearby status within 40px
-        if (distSq < 40 * 40 && (cleanExistingBase === cleanNewText || distSq < 22 * 22)) {
+        // If same ailment within 48px or adjacent status within 28px
+        if (distSq < 48 * 48 && (cleanExistingBase === cleanNewText || distSq < 28 * 28)) {
           active.aggregateText(cleanNewText, colorHex);
           return active;
         }
       }
     }
 
-    // 2. Limit total active text popups on screen (max 6 active status text popups)
+    // 2. Limit total active status popups on screen to maintain clean combat visual hierarchy (max 8)
     const activeTextItems = this.activeItems.filter(item => item.active && item.type === 'text');
-    if (activeTextItems.length >= 6) {
+    if (activeTextItems.length >= 8) {
       let nearest: PopupItem | null = null;
       let minSq = Infinity;
       for (const item of activeTextItems) {
@@ -499,11 +526,12 @@ export class PopupManager {
       }
     }
 
+    // Stagger vertically to avoid overlap if close to existing text
     let offsetY = -10;
     for (const active of activeTextItems) {
-      if (active.elapsedMs < 350) {
+      if (active.elapsedMs < 600) {
         if (Math.abs(active.startX - x) < 36 && Math.abs(active.startY - (y + offsetY)) < 18) {
-          offsetY -= 14;
+          offsetY -= 15;
         }
       }
     }
@@ -512,12 +540,15 @@ export class PopupManager {
     item.init({
       x,
       y: y + offsetY,
-      text,
+      text: cleanNewText,
       type: 'text',
       isCrit: true,
-      durationMs: 850,
+      durationMs: POPUP_CONFIG.statusDurationMs,
     });
-    item.textSprite.style.fill = colorHex;
+    if (colorHex !== undefined) {
+      item.textSprite.style.fill = colorHex;
+      item.textSprite.style.stroke = { color: 0x020617, width: 2.8 };
+    }
     item.baseText = cleanNewText;
     item.hitCount = 1;
     this.activeItems.push(item);
@@ -528,13 +559,13 @@ export class PopupManager {
   public spawnDamage(x: number, y: number, damage: number, isCrit: boolean = false, multiplier: number = 1.5): PopupItem | null {
     if (this.density === 'off') return null;
 
-    // 1. Search for a nearby active damage popup to aggregate into (within 45px, elapsedMs < 500)
+    // 1. Search for a nearby active damage popup to aggregate into (within 48px, elapsedMs < 1000)
     let closestItem: PopupItem | null = null;
-    let closestDistSq = 45 * 45; // 45px radius
+    let closestDistSq = 48 * 48;
 
     for (let i = this.activeItems.length - 1; i >= 0; i--) {
       const existing = this.activeItems[i];
-      if (existing.active && (existing.type === 'damage' || existing.type === 'critical') && existing.elapsedMs < 500) {
+      if (existing.active && (existing.type === 'damage' || existing.type === 'critical') && existing.elapsedMs < 1000) {
         const dx = existing.startX - x;
         const dy = existing.startY - y;
         const distSq = dx * dx + dy * dy;
@@ -550,13 +581,12 @@ export class PopupManager {
       return closestItem;
     }
 
-    // 2. Count current active damage popups
+    // 2. Count current active damage popups (limit to 12 max active on screen)
     const activeDamageItems = this.activeItems.filter(
       item => item.active && (item.type === 'damage' || item.type === 'critical')
     );
 
-    // If active damage popups limit reached (e.g. 10 max active), aggregate into closest active damage popup on screen
-    if (activeDamageItems.length >= 10) {
+    if (activeDamageItems.length >= 12) {
       let fallbackItem: PopupItem | null = null;
       let minSq = Infinity;
       for (const item of activeDamageItems) {
@@ -594,6 +624,7 @@ export class PopupManager {
       type: isCrit ? 'critical' : 'damage',
       isCrit,
       multiplier,
+      durationMs: isCrit ? POPUP_CONFIG.damageDurationMs + 200 : POPUP_CONFIG.damageDurationMs,
     }, damage);
 
     this.activeItems.push(item);
@@ -604,13 +635,13 @@ export class PopupManager {
   public spawnPlayerDamage(x: number, y: number, damage: number): PopupItem | null {
     if (this.density === 'off' || damage <= 0) return null;
 
-    // Aggregate into recent player damage popup within 35px & 450ms
+    // Aggregate into recent player damage popup within 40px & 1100ms
     for (let i = this.activeItems.length - 1; i >= 0; i--) {
       const existing = this.activeItems[i];
-      if (existing.active && existing.type === 'player_damage' && existing.elapsedMs < 450) {
+      if (existing.active && existing.type === 'player_damage' && existing.elapsedMs < 1100) {
         const dx = existing.startX - x;
         const dy = existing.startY - y;
-        if (dx * dx + dy * dy < 35 * 35) {
+        if (dx * dx + dy * dy < 40 * 40) {
           existing.aggregatePlayerDamage(damage);
           return existing;
         }
@@ -624,7 +655,7 @@ export class PopupManager {
       y: y - 6,
       text: `-${formattedDmg}`,
       type: 'player_damage',
-      durationMs: 850,
+      durationMs: POPUP_CONFIG.playerDamageDurationMs,
     }, damage);
 
     this.activeItems.push(item);
@@ -635,11 +666,11 @@ export class PopupManager {
   public spawnStardust(x: number, y: number, amount: number, isCritDrop: boolean = false, useLegacyFormat: boolean = false, bonusLabel?: string): PopupItem | null {
     if (this.density === 'off') return null;
 
-    // Merge logic: check for nearby currency popups in active floating phase
+    // Merge logic: check for nearby currency popups within 36px in active floating phase (up to 1200ms)
     for (const active of this.activeItems) {
-      if (active.active && (active.type === 'stardust' || active.type === 'shard') && active.elapsedMs < 500) {
+      if (active.active && (active.type === 'stardust' || active.type === 'shard') && active.elapsedMs < 1200) {
         const distSq = Math.pow(active.startX - x, 2) + Math.pow(active.startY - y, 2);
-        if (distSq < 20 * 20) {
+        if (distSq < 36 * 36) {
           active.mergeCurrency('stardust', amount, isCritDrop);
           return active;
         }
@@ -653,12 +684,13 @@ export class PopupManager {
 
     item.init({
       x,
-      y: y + 8, // Offset cash slightly down
+      y: y + 6,
       text,
       type: 'stardust',
       isCrit: isCritDrop,
       bonusLabel,
       useLegacyFormat,
+      durationMs: POPUP_CONFIG.cashDurationMs,
     }, amount);
 
     this.activeItems.push(item);
@@ -672,11 +704,11 @@ export class PopupManager {
   public spawnShard(x: number, y: number, amount: number = 1, bonusLabel?: string): PopupItem | null {
     if (this.density === 'off') return null;
 
-    // Merge logic: check for nearby currency popups in active floating phase
+    // Merge logic: check for nearby currency popups within 36px in active floating phase
     for (const active of this.activeItems) {
-      if (active.active && (active.type === 'stardust' || active.type === 'shard') && active.elapsedMs < 500) {
+      if (active.active && (active.type === 'stardust' || active.type === 'shard') && active.elapsedMs < 1200) {
         const distSq = Math.pow(active.startX - x, 2) + Math.pow(active.startY - y, 2);
-        if (distSq < 20 * 20) {
+        if (distSq < 36 * 36) {
           active.mergeCurrency('shard', amount);
           return active;
         }
@@ -689,10 +721,11 @@ export class PopupManager {
 
     item.init({
       x,
-      y: y - 22, // Offset shard further up
+      y: y - 20,
       text,
       type: 'shard',
       bonusLabel,
+      durationMs: POPUP_CONFIG.cashDurationMs,
     }, amount);
 
     this.activeItems.push(item);
@@ -700,38 +733,31 @@ export class PopupManager {
   }
 
   public flushPendingCurrency() {
+    // Deliver pending currency callbacks without prematurely destroying on-screen visual animations
     for (let i = this.activeItems.length - 1; i >= 0; i--) {
       const item = this.activeItems[i];
       if (item.active && (item.type === 'stardust' || item.type === 'shard')) {
         if (this.onCurrencyImpact && item.numericValue > 0) {
           this.onCurrencyImpact(item.type, item.numericValue);
         }
-        item.reset();
-        this.activeItems.splice(i, 1);
       }
     }
   }
 
   public update(deltaMs: number) {
-    this.accumulatedDeltaMs += deltaMs;
-    // Cap accumulated delta to 150ms to prevent huge jumps
-    if (this.accumulatedDeltaMs > 150) this.accumulatedDeltaMs = 150;
+    // Smooth 60 FPS continuous update with delta clamping
+    const stepMs = Math.min(deltaMs, 50);
 
-    if (this.accumulatedDeltaMs >= this.STEP_30FPS_MS) {
-      const stepMs = this.accumulatedDeltaMs;
-      this.accumulatedDeltaMs = 0;
-
-      for (let i = this.activeItems.length - 1; i >= 0; i--) {
-        const item = this.activeItems[i];
-        const stillActive = item.update(stepMs);
-        if (!stillActive) {
-          this.activeItems.splice(i, 1);
-        }
+    for (let i = this.activeItems.length - 1; i >= 0; i--) {
+      const item = this.activeItems[i];
+      const stillActive = item.update(stepMs);
+      if (!stillActive) {
+        this.activeItems.splice(i, 1);
       }
+    }
 
-      for (let i = this.impactSparks.length - 1; i >= 0; i--) {
-        this.impactSparks[i].update(stepMs);
-      }
+    for (let i = this.impactSparks.length - 1; i >= 0; i--) {
+      this.impactSparks[i].update(stepMs);
     }
   }
 

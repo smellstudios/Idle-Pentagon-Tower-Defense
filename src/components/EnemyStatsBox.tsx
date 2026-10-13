@@ -16,7 +16,7 @@ interface Props {
   className?: string;
 }
 
-export const EnemyStatsBox: React.FC<Props> = ({ gameState, upgrades, className = '' }) => {
+export const EnemyStatsBox: React.FC<Props> = React.memo(({ gameState, upgrades, className = '' }) => {
   const isBossWave = WAVE_CONFIG.isBossWave(gameState.wave);
   const playerCombatStats = calculatePlayerCombatStats(upgrades || [], gameState);
   const playerSummary = {
@@ -139,4 +139,4 @@ export const EnemyStatsBox: React.FC<Props> = ({ gameState, upgrades, className 
       </div>
     </div>
   );
-};
+});

@@ -14,7 +14,7 @@ interface Props {
   isDead?: boolean;
 }
 
-export const BossHealthBar: React.FC<Props> = ({ boss, isDead }) => {
+export const BossHealthBar: React.FC<Props> = React.memo(({ boss, isDead }) => {
   if (!boss || isDead) return null;
 
   const currentHp = Math.max(0, boss.hp);
@@ -237,5 +237,5 @@ export const BossHealthBar: React.FC<Props> = ({ boss, isDead }) => {
       </motion.div>
     </AnimatePresence>
   );
-};
+});
 
