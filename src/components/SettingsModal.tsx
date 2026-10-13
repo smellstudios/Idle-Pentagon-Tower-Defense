@@ -317,6 +317,66 @@ export const SettingsModal: React.FC<Props> = ({
                     ))}
                   </div>
                 </div>
+
+                {/* High-Density Performance Mode */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
+                  <div className="pr-3">
+                    <h4 className="font-mono text-xs font-bold text-white">High-Density Mode</h4>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      Locks DPR to 1.0 and tightens VFX budgets. Highly recommended for mid-range mobile devices under 500+ enemy hordes.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => onUpdateSettings({ highPerformanceMode: !settings.highPerformanceMode })}
+                    className={`px-3 py-1.5 rounded-lg border font-mono text-xs font-bold transition-all cursor-pointer ${
+                      settings.highPerformanceMode
+                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                        : 'bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {settings.highPerformanceMode ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Adaptive Performance Governor */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
+                  <div className="pr-3">
+                    <h4 className="font-mono text-xs font-bold text-white">Adaptive Governor</h4>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      Monitors rolling frame times. Automatically applies distant enemy LOD staggering if frame time exceeds 18.5 ms to maintain 60 FPS.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => onUpdateSettings({ adaptivePerformanceMode: settings.adaptivePerformanceMode === false ? true : false })}
+                    className={`px-3 py-1.5 rounded-lg border font-mono text-xs font-bold transition-all cursor-pointer ${
+                      settings.adaptivePerformanceMode !== false
+                        ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300'
+                        : 'bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {settings.adaptivePerformanceMode !== false ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Debug Performance HUD */}
+                <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
+                  <div className="pr-3">
+                    <h4 className="font-mono text-xs font-bold text-white">Debug Performance HUD</h4>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">
+                      Renders live FPS, frame latency (ms), active enemy counts, and projectile counts on-screen.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => onUpdateSettings({ showPerformanceHud: !settings.showPerformanceHud })}
+                    className={`px-3 py-1.5 rounded-lg border font-mono text-xs font-bold transition-all cursor-pointer ${
+                      settings.showPerformanceHud
+                        ? 'bg-purple-950/80 border-purple-500 text-purple-300'
+                        : 'bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {settings.showPerformanceHud ? 'ON' : 'OFF'}
+                  </button>
+                </div>
               </div>
             )}
 

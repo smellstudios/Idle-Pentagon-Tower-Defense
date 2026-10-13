@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Application, Graphics, Container } from 'pixi.js';
+import { Application, Graphics, Container, Texture, Rectangle, Sprite } from 'pixi.js';
 import { GAME_WIDTH, GAME_HEIGHT, PLAYER_RADIUS } from './constants';
 
 export class Renderer {
@@ -20,6 +20,11 @@ export class Renderer {
   public enemyContainer: Container;
   public projectileContainer: Container;
   public popupContainer: Container;
+
+  // High-Density Procedural Texture Atlases (baked once at boot with pure-white fills/strokes)
+  public enemyTextures: Map<string, Texture> = new Map();
+  public projectileTextures: Map<string, Texture> = new Map();
+  private currentQualityTier: 0 | 1 | 2 = 0;
 
   // Optimized Player Sub-elements (pre-rendered once to avoid rebuilding vertex buffers every frame)
   private playerBodyGraphics: Graphics;
@@ -120,14 +125,213 @@ export class Renderer {
     
     this.world.x = 0;
     this.world.y = 0;
+
+    // Initialize 128x128 procedural texture atlases for enemies and projectiles
+    this.initTextureAtlases();
   }
 
   public setHighPerformanceMode(enabled: boolean) {
     if (this.isHighPerformance === enabled || !this.app.renderer) return;
     this.isHighPerformance = enabled;
-    const targetDpr = enabled ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+    const targetDpr = enabled ? 1 : (this.currentQualityTier > 0 ? 1 : Math.min(window.devicePixelRatio || 1, 2));
     this.app.renderer.resolution = targetDpr;
     this.app.renderer.resize(this.app.canvas.width / targetDpr, this.app.canvas.height / targetDpr);
+  }
+
+  public setQualityTier(tier: 0 | 1 | 2) {
+    if (this.currentQualityTier === tier || !this.app.renderer) return;
+    this.currentQualityTier = tier;
+    const targetDpr = (tier > 0 || this.isHighPerformance) ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+    if (this.app.renderer.resolution !== targetDpr) {
+      this.app.renderer.resolution = targetDpr;
+      this.app.renderer.resize(this.app.canvas.width / targetDpr, this.app.canvas.height / targetDpr);
+    }
+  }
+
+  public getQualityTier(): 0 | 1 | 2 {
+    return this.currentQualityTier;
+  }
+
+  /**
+   * Generates pure-white 128x128 GPU textures for all 15 enemy shapes and projectiles.
+   * By rendering pure white fill and stroke, WebGL sprite.tint dynamically tints
+   * base colors, golden states, poison, freeze, and enrage states with 100% visual parity.
+   */
+  private initTextureAtlases() {
+    const frame = new Rectangle(-32, -32, 64, 64);
+    const textureResolution = 2; // Produces crisp 128x128 textures
+
+    const enemyTypes = [
+      'red_square',
+      'orange_triangle',
+      'big_square',
+      'circle',
+      'purple_pentagon',
+      'gold_hexagon',
+      'emerald_diamond',
+      'crimson_octagon',
+      'enraged_trapezium',
+      'disruptor_emp',
+      'reflector_prism',
+      'splitter_cluster',
+      'cluster_mini',
+      'phase_shifter',
+      'boss',
+    ];
+
+    for (const type of enemyTypes) {
+      const g = new Graphics();
+      if (type === 'boss') {
+        const innerRadius = 8;
+        const outerRadius = 15;
+        const points: { x: number; y: number }[] = [];
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? outerRadius : innerRadius;
+          const a = (i / 10) * Math.PI * 2;
+          points.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+        }
+        g.poly(points).fill(0xffffff).stroke({ color: 0xffffff, width: 2, alpha: 0.6 });
+        // Golden Super Armor Shield Crown Outer Ring
+        g.circle(0, 0, 18).stroke({ color: 0xffffff, width: 2.5, alpha: 0.9 });
+        for (let i = 0; i < 3; i++) {
+          const ca = (i / 3) * Math.PI * 2;
+          g.circle(Math.cos(ca) * 18, Math.sin(ca) * 18, 2.5).fill(0xffffff);
+        }
+      } else if (type === 'purple_pentagon') {
+        const pts = [];
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+          pts.push({ x: Math.cos(a) * 6.5, y: Math.sin(a) * 6.5 });
+        }
+        g.poly(pts).fill(0xffffff).stroke({ color: 0xffffff, width: 1.2, alpha: 0.85 });
+      } else if (type === 'gold_hexagon') {
+        const pts = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * 7.5, y: Math.sin(a) * 7.5 });
+        }
+        g.poly(pts).fill(0xffffff).stroke({ color: 0xffffff, width: 1.5, alpha: 0.9 });
+      } else if (type === 'emerald_diamond') {
+        g.poly([{ x: 0, y: -7.5 }, { x: 4.5, y: 0 }, { x: 0, y: 7.5 }, { x: -4.5, y: 0 }]).fill(0xffffff).stroke({ color: 0xffffff, width: 1.2, alpha: 0.85 });
+      } else if (type === 'crimson_octagon') {
+        const pts = [];
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+          pts.push({ x: Math.cos(a) * 8.5, y: Math.sin(a) * 8.5 });
+        }
+        g.poly(pts).fill(0xffffff).stroke({ color: 0xffffff, width: 1.5, alpha: 0.9 });
+      } else if (type === 'enraged_trapezium') {
+        g.poly([
+          { x: -3.5, y: -5 },
+          { x: 3.5, y: -5 },
+          { x: 6.5, y: 5 },
+          { x: -6.5, y: 5 }
+        ]).fill(0xffffff).stroke({ color: 0xffffff, width: 1.5, alpha: 0.9 });
+      } else if (type === 'disruptor_emp') {
+        const pts = [];
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? 6.5 : 3.8;
+          const a = (i / 10) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+        }
+        g.poly(pts).fill(0xffffff).stroke({ color: 0xffffff, width: 1.2, alpha: 0.9 });
+        g.circle(0, 0, 2.5).fill(0xffffff);
+      } else if (type === 'reflector_prism') {
+        g.poly([
+          { x: 0, y: -6.5 },
+          { x: 5.5, y: -2 },
+          { x: 0, y: 6.5 },
+          { x: -5.5, y: -2 }
+        ]).fill(0xffffff).stroke({ color: 0xffffff, width: 1.5, alpha: 0.95 });
+        g.moveTo(0, -6.5).lineTo(0, 6.5).stroke({ color: 0xffffff, width: 1, alpha: 0.7 });
+        g.moveTo(-5.5, -2).lineTo(5.5, -2).stroke({ color: 0xffffff, width: 1, alpha: 0.7 });
+      } else if (type === 'splitter_cluster') {
+        const pts = [];
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
+          pts.push({ x: Math.cos(a) * 7.0, y: Math.sin(a) * 7.0 });
+        }
+        g.poly(pts).fill(0xffffff).stroke({ color: 0xffffff, width: 1.5, alpha: 0.9 });
+        g.moveTo(0, 0).lineTo(0, -7.0).stroke({ color: 0xffffff, width: 1, alpha: 0.6 });
+        g.moveTo(0, 0).lineTo(6.0, 3.5).stroke({ color: 0xffffff, width: 1, alpha: 0.6 });
+        g.moveTo(0, 0).lineTo(-6.0, 3.5).stroke({ color: 0xffffff, width: 1, alpha: 0.6 });
+      } else if (type === 'cluster_mini') {
+        g.poly([
+          { x: 0, y: -4 },
+          { x: 3.5, y: 3.5 },
+          { x: -3.5, y: 3.5 }
+        ]).fill(0xffffff).stroke({ color: 0xffffff, width: 1, alpha: 0.9 });
+      } else if (type === 'phase_shifter') {
+        const pts = [];
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2;
+          pts.push({ x: Math.cos(a) * 6.0, y: Math.sin(a) * 6.0 });
+        }
+        g.poly(pts).fill(0xffffff).stroke({ color: 0xffffff, width: 1.4, alpha: 0.9 });
+        g.circle(0, 0, 2.5).fill(0x333333);
+      } else if (type === 'orange_triangle') {
+        g.poly([{ x: 0, y: -6 }, { x: 5.5, y: 5 }, { x: -5.5, y: 5 }]).fill(0xffffff).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
+      } else if (type === 'circle') {
+        g.circle(0, 0, 5).fill(0xffffff).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
+      } else if (type === 'big_square') {
+        g.rect(-6, -6, 12, 12).fill(0xffffff).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
+      } else {
+        g.rect(-4, -4, 8, 8).fill(0xffffff).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
+      }
+
+      const tex = this.app.renderer.generateTexture({
+        target: g,
+        frame,
+        resolution: textureResolution,
+        antialias: true,
+      });
+      this.enemyTextures.set(type, tex);
+      g.destroy();
+    }
+
+    // Projectile Textures
+    const projFrame = new Rectangle(-16, -16, 32, 32);
+
+    // 1. Standard player bullet
+    const gStd = new Graphics();
+    gStd.roundRect(-1.0, -4.25, 2.0, 8.5, 0.75).fill(0x38bdf8);
+    gStd.roundRect(-0.5, -3.25, 1.0, 6.5, 0.5).fill(0xffffff);
+    this.projectileTextures.set('standard', this.app.renderer.generateTexture({ target: gStd, frame: projFrame, resolution: 2 }));
+    gStd.destroy();
+
+    // 2. Enemy red bullet
+    const gEn = new Graphics();
+    gEn.circle(0, 0, 3.5).fill(0xef4444).stroke({ color: 0xffffff, width: 0.75 });
+    gEn.circle(0, 0, 1.5).fill(0xffffff);
+    this.projectileTextures.set('enemy', this.app.renderer.generateTexture({ target: gEn, frame: projFrame, resolution: 2 }));
+    gEn.destroy();
+
+    // 3. Gatling fast bullet
+    const gGat = new Graphics();
+    gGat.roundRect(-0.8, -3.5, 1.6, 7.0, 0.5).fill(0xfacc15);
+    gGat.roundRect(-0.4, -2.5, 0.8, 5.0, 0.4).fill(0xffffff);
+    this.projectileTextures.set('gatling', this.app.renderer.generateTexture({ target: gGat, frame: projFrame, resolution: 2 }));
+    gGat.destroy();
+
+    // 4. Calamity heavy shell
+    const gCal = new Graphics();
+    gCal.circle(0, 0, 7.5).fill(0xf97316).stroke({ color: 0xef4444, width: 1.5 });
+    gCal.circle(0, 0, 4.0).fill(0xffffff);
+    this.projectileTextures.set('calamity_shell', this.app.renderer.generateTexture({ target: gCal, frame: projFrame, resolution: 2 }));
+    gCal.destroy();
+
+    // 5. Singularity vortex
+    const gSing = new Graphics();
+    gSing.circle(0, 0, 10.0).stroke({ color: 0xc084fc, width: 2.0, alpha: 0.8 });
+    gSing.circle(0, 0, 5.0).fill(0x3b0764);
+    this.projectileTextures.set('singularity_vortex', this.app.renderer.generateTexture({ target: gSing, frame: projFrame, resolution: 2 }));
+    gSing.destroy();
+
+    // 6. Bomblet
+    const gBomb = new Graphics();
+    gBomb.circle(0, 0, 4.5).fill(0xea580c).stroke({ color: 0xfacc15, width: 1.0 });
+    this.projectileTextures.set('calamity_bomblet', this.app.renderer.generateTexture({ target: gBomb, frame: projFrame, resolution: 2 }));
+    gBomb.destroy();
   }
 
   private buildStaticPlayerGeometry() {

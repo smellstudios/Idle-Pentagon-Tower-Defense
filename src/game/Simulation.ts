@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Graphics } from 'pixi.js';
+import { Graphics, Sprite } from 'pixi.js';
 import { GameState, Upgrade, LifetimeStats, Entity } from '../types';
 import { Renderer } from './Renderer';
 import { 
@@ -20,6 +20,8 @@ import {
   rollBossRareDrop,
   calculatePlayerCombatStats,
   PlayerCombatStats,
+  ENEMY_TYPE_COLORS,
+  PERFORMANCE_CONFIG,
 } from './constants';
 import { PopupManager } from './popups';
 import { soundEngine } from './sound';
@@ -39,6 +41,7 @@ export class Simulation {
   private enemyProjectilePool: Entity[] = [];
   private enemyPools: Map<string, Entity[]> = new Map();
   private spatialGrid: SpatialGrid = new SpatialGrid(60);
+  private enemyLodFrame: number = 0;
 
   public popupManager: PopupManager;
   public onRareDropAcquired?: (item: any, type: 'drop' | 'synergy') => void;
@@ -209,46 +212,89 @@ export class Simulation {
   }
 
   private prewarmPools() {
-    // 1. Pre-warm Projectile Pool (120 units)
-    for (let i = 0; i < 120; i++) {
-      const graphics = new Graphics();
-      // Remastered clean "-" dash bullet (8.5px length, 2.0px width)
-      graphics
-        .roundRect(-1.0, -4.25, 2.0, 8.5, 0.75)
-        .fill(0x38bdf8);
-      graphics.roundRect(-0.5, -3.25, 1.0, 6.5, 0.5).fill(0xffffff);
-      graphics.visible = false;
-      this.renderer.projectileContainer.addChild(graphics);
+    // 1. Pre-warm 400-Sprite Projectile Pool (strictly pre-warmed at init, zero runtime growth)
+    const stdProjTex = this.renderer.projectileTextures.get('standard')!;
+    for (let i = 0; i < PERFORMANCE_CONFIG.projectilePoolCapacity; i++) {
+      const sprite = new Sprite(stdProjTex);
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.renderer.projectileContainer.addChild(sprite);
       this.projectilePool.push({
         x: 0,
         y: 0,
         hp: 1,
         maxHp: 1,
-        graphics,
-        speed: 4.8,
+        graphics: sprite,
+        speed: 5.5,
         radius: 2.5,
         rotation: 0,
         angularVelocity: 0,
       });
     }
 
-    // 2. Pre-warm Enemy Projectile Pool (60 units)
-    for (let i = 0; i < 60; i++) {
-      const graphics = new Graphics();
-      graphics.circle(0, 0, 3).fill(0xef4444).stroke({ color: 0xffffff, width: 0.75 });
-      graphics.visible = false;
-      this.renderer.projectileContainer.addChild(graphics);
+    // 2. Pre-warm Enemy Projectile Pool (80 units)
+    const enProjTex = this.renderer.projectileTextures.get('enemy') || stdProjTex;
+    for (let i = 0; i < 80; i++) {
+      const sprite = new Sprite(enProjTex);
+      sprite.anchor.set(0.5, 0.5);
+      sprite.visible = false;
+      this.renderer.projectileContainer.addChild(sprite);
       this.enemyProjectilePool.push({
         x: 0,
         y: 0,
         hp: 1,
         maxHp: 1,
-        graphics,
+        graphics: sprite,
         speed: 2.2,
         radius: 3,
         rotation: 0,
         angularVelocity: 0,
       });
+    }
+
+    // 3. Pre-warm Enemy Sprite Pools for common shapes (zero stutter on massive waves)
+    const commonTypes: Record<string, number> = {
+      red_square: 40,
+      orange_triangle: 25,
+      big_square: 20,
+      circle: 20,
+      purple_pentagon: 15,
+      gold_hexagon: 15,
+      emerald_diamond: 15,
+      crimson_octagon: 15,
+      enraged_trapezium: 15,
+      disruptor_emp: 10,
+      reflector_prism: 10,
+      splitter_cluster: 10,
+      cluster_mini: 20,
+      phase_shifter: 10,
+      boss: 4,
+    };
+
+    for (const [type, count] of Object.entries(commonTypes)) {
+      const tex = this.renderer.enemyTextures.get(type) || this.renderer.enemyTextures.get('red_square')!;
+      let pool = this.enemyPools.get(type);
+      if (!pool) {
+        pool = [];
+        this.enemyPools.set(type, pool);
+      }
+      for (let i = 0; i < count; i++) {
+        const sprite = new Sprite(tex);
+        sprite.anchor.set(0.5, 0.5);
+        sprite.visible = false;
+        this.renderer.enemyContainer.addChild(sprite);
+        pool.push({
+          x: 0,
+          y: 0,
+          hp: 1,
+          maxHp: 1,
+          graphics: sprite,
+          type,
+          radius: PHYSICS_CONFIG.enemyRadii[type as keyof typeof PHYSICS_CONFIG.enemyRadii] || 5,
+          rotation: 0,
+          angularVelocity: 0,
+        });
+      }
     }
   }
 
@@ -1179,6 +1225,22 @@ export class Simulation {
   }
 
   public spawnExplosion(x: number, y: number, maxRadius: number, color: number = 0xf97316) {
+    const tier = this.renderer.getQualityTier();
+    const cap = tier === 2 
+      ? PERFORMANCE_CONFIG.vfxCaps.tier2.maxExplosions 
+      : (tier === 1 ? PERFORMANCE_CONFIG.vfxCaps.tier1.maxExplosions : PERFORMANCE_CONFIG.vfxCaps.tier0.maxExplosions);
+
+    if (this.activeExplosions.length >= cap) {
+      const oldest = this.activeExplosions[0];
+      oldest.x = x;
+      oldest.y = y;
+      oldest.radius = Math.max(oldest.radius, 4);
+      oldest.maxRadius = Math.max(oldest.maxRadius, maxRadius);
+      oldest.lifeMs = 350;
+      oldest.color = color;
+      return;
+    }
+
     this.activeExplosions.push({
       x,
       y,
@@ -1203,6 +1265,12 @@ export class Simulation {
   }
 
   public spawnLightningZap(x1: number, y1: number, x2: number, y2: number, color: number = 0x38bdf8) {
+    const tier = this.renderer.getQualityTier();
+    const cap = tier === 2 
+      ? PERFORMANCE_CONFIG.vfxCaps.tier2.maxLightningArcs 
+      : (tier === 1 ? PERFORMANCE_CONFIG.vfxCaps.tier1.maxLightningArcs : PERFORMANCE_CONFIG.vfxCaps.tier0.maxLightningArcs);
+    if (this.activeLightningArcs.length >= cap) return;
+
     this.activeLightningArcs.push({
       x1,
       y1,
@@ -1216,6 +1284,12 @@ export class Simulation {
   }
 
   public launchRocketsBarrage(baseAngle: number, damage: number) {
+    const tier = this.renderer.getQualityTier();
+    const cap = tier === 2 
+      ? PERFORMANCE_CONFIG.vfxCaps.tier2.maxRockets 
+      : (tier === 1 ? PERFORMANCE_CONFIG.vfxCaps.tier1.maxRockets : PERFORMANCE_CONFIG.vfxCaps.tier0.maxRockets);
+    if (this.activeRockets.length >= cap) return;
+
     const cx = GAME_WIDTH / 2;
     const cy = GAME_HEIGHT / 2;
     soundEngine.playRocketLaunch();
@@ -2128,7 +2202,7 @@ export class Simulation {
       enemy.isPhased = false;
       enemy.phaseTimerMs = type === 'phase_shifter' ? (3000 + Math.random() * 1000) : undefined;
 
-      enemy.graphics.tint = isGolden ? 0xfacc15 : 0xffffff;
+      enemy.graphics.tint = isGolden ? 0xfacc15 : color;
       enemy.graphics.visible = true;
       enemy.graphics.alpha = 1.0;
       enemy.graphics.x = x;
@@ -2138,120 +2212,24 @@ export class Simulation {
       return enemy;
     }
 
-    const graphics = new Graphics();
+    const tex = this.renderer.enemyTextures.get(type) || this.renderer.enemyTextures.get('red_square')!;
+    const sprite = new Sprite(tex);
+    sprite.anchor.set(0.5, 0.5);
+    sprite.tint = isGolden ? 0xfacc15 : color;
+    sprite.visible = true;
+    sprite.alpha = 1.0;
+    sprite.x = x;
+    sprite.y = y;
+    const initialRotation = Math.random() * Math.PI * 2;
+    sprite.rotation = initialRotation;
+    this.renderer.enemyContainer.addChild(sprite);
 
-    if (type === 'boss') {
-      const innerRadius = 8;
-      const outerRadius = 15;
-      const points: { x: number; y: number }[] = [];
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 === 0 ? outerRadius : innerRadius;
-        const a = (i / 10) * Math.PI * 2;
-        points.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
-      }
-      graphics.poly(points).fill(color).stroke({ color: 0xffffff, width: 2, alpha: 0.6 });
-      // Golden Super Armor Shield Crown Outer Ring
-      graphics.circle(0, 0, 18).stroke({ color: 0xfacc15, width: 2.5, alpha: 0.9 });
-      for (let i = 0; i < 3; i++) {
-        const ca = (i / 3) * Math.PI * 2;
-        graphics.circle(Math.cos(ca) * 18, Math.sin(ca) * 18, 2.5).fill(0xfacc15);
-      }
-    } else if (type === 'purple_pentagon') {
-      const pts = [];
-      for (let i = 0; i < 5; i++) {
-        const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
-        pts.push({ x: Math.cos(a) * 6.5, y: Math.sin(a) * 6.5 });
-      }
-      graphics.poly(pts).fill(color).stroke({ color: 0xe9d5ff, width: 1.2, alpha: 0.85 });
-    } else if (type === 'gold_hexagon') {
-      const pts = [];
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2;
-        pts.push({ x: Math.cos(a) * 7.5, y: Math.sin(a) * 7.5 });
-      }
-      graphics.poly(pts).fill(color).stroke({ color: 0xfef08a, width: 1.5, alpha: 0.9 });
-    } else if (type === 'emerald_diamond') {
-      graphics.poly([{ x: 0, y: -7.5 }, { x: 4.5, y: 0 }, { x: 0, y: 7.5 }, { x: -4.5, y: 0 }]).fill(color).stroke({ color: 0x6ee7b7, width: 1.2, alpha: 0.85 });
-    } else if (type === 'crimson_octagon') {
-      const pts = [];
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-        pts.push({ x: Math.cos(a) * 8.5, y: Math.sin(a) * 8.5 });
-      }
-      graphics.poly(pts).fill(color).stroke({ color: 0xfca5a5, width: 1.5, alpha: 0.9 });
-    } else if (type === 'enraged_trapezium') {
-      // Isosceles Trapezium: Top width 7, Bottom width 13, Height 10
-      graphics.poly([
-        { x: -3.5, y: -5 },
-        { x: 3.5, y: -5 },
-        { x: 6.5, y: 5 },
-        { x: -6.5, y: 5 }
-      ]).fill(color).stroke({ color: 0xfdba74, width: 1.5, alpha: 0.9 });
-    } else if (type === 'disruptor_emp') {
-      // Jagged 10-point ion sawtooth star
-      const pts = [];
-      for (let i = 0; i < 10; i++) {
-        const r = i % 2 === 0 ? 6.5 : 3.8;
-        const a = (i / 10) * Math.PI * 2;
-        pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
-      }
-      graphics.poly(pts).fill(color).stroke({ color: 0x67e8f9, width: 1.2, alpha: 0.9 });
-      graphics.circle(0, 0, 2.5).fill(0xffffff);
-    } else if (type === 'reflector_prism') {
-      // Faceted diamond prism
-      graphics.poly([
-        { x: 0, y: -6.5 },
-        { x: 5.5, y: -2 },
-        { x: 0, y: 6.5 },
-        { x: -5.5, y: -2 }
-      ]).fill(color).stroke({ color: 0xe0f2fe, width: 1.5, alpha: 0.95 });
-      // Internal facet reflection cross
-      graphics.moveTo(0, -6.5).lineTo(0, 6.5).stroke({ color: 0xffffff, width: 1, alpha: 0.7 });
-      graphics.moveTo(-5.5, -2).lineTo(5.5, -2).stroke({ color: 0xffffff, width: 1, alpha: 0.7 });
-    } else if (type === 'splitter_cluster') {
-      // Segmented matrix heptagon (7 sides)
-      const pts = [];
-      for (let i = 0; i < 7; i++) {
-        const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
-        pts.push({ x: Math.cos(a) * 7.0, y: Math.sin(a) * 7.0 });
-      }
-      graphics.poly(pts).fill(color).stroke({ color: 0x6ee7b7, width: 1.5, alpha: 0.9 });
-      // Internal fracture lines
-      graphics.moveTo(0, 0).lineTo(0, -7.0).stroke({ color: 0xa7f3d0, width: 1, alpha: 0.6 });
-      graphics.moveTo(0, 0).lineTo(6.0, 3.5).stroke({ color: 0xa7f3d0, width: 1, alpha: 0.6 });
-      graphics.moveTo(0, 0).lineTo(-6.0, 3.5).stroke({ color: 0xa7f3d0, width: 1, alpha: 0.6 });
-    } else if (type === 'cluster_mini') {
-      // Mini emerald shard
-      graphics.poly([
-        { x: 0, y: -4 },
-        { x: 3.5, y: 3.5 },
-        { x: -3.5, y: 3.5 }
-      ]).fill(color).stroke({ color: 0xa7f3d0, width: 1, alpha: 0.9 });
-    } else if (type === 'phase_shifter') {
-      // Tachyon 9-pointed quantum star with void aperture
-      const pts = [];
-      for (let i = 0; i < 9; i++) {
-        const a = (i / 9) * Math.PI * 2;
-        pts.push({ x: Math.cos(a) * 6.0, y: Math.sin(a) * 6.0 });
-      }
-      graphics.poly(pts).fill(color).stroke({ color: 0xd8b4fe, width: 1.4, alpha: 0.9 });
-      graphics.circle(0, 0, 2.5).fill(0x2e1065);
-    } else if (type === 'orange_triangle') {
-      graphics.poly([{ x: 0, y: -6 }, { x: 5.5, y: 5 }, { x: -5.5, y: 5 }]).fill(color).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
-    } else if (type === 'circle') {
-      graphics.circle(0, 0, 5).fill(color).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
-    } else {
-      const size = type === 'big_square' ? 12 : 8;
-      graphics.rect(-size / 2, -size / 2, size, size).fill(color).stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
-    }
-
-    this.renderer.enemyContainer.addChild(graphics);
     const newEnemy: Entity = {
       x,
       y,
       hp: finalHp,
       maxHp: finalHp,
-      graphics,
+      graphics: sprite,
       type,
       speed,
       dps,
@@ -2278,7 +2256,7 @@ export class Simulation {
       phaseTimerMs: type === 'phase_shifter' ? (3000 + Math.random() * 1000) : undefined,
     };
     if (isGolden) {
-      graphics.tint = 0xfacc15;
+      newEnemy.graphics.tint = 0xfacc15;
     }
     this.enemies.push(newEnemy);
     return newEnemy;
@@ -2341,48 +2319,37 @@ export class Simulation {
 
     let p = this.enemyProjectilePool.pop();
     if (!p) {
-      const graphics = new Graphics();
-      // MENACING ENEMY BULLET (Spiky Diamond)
-      graphics
-        .poly([
-          { x: 0, y: -6 },
-          { x: 3, y: 0 },
-          { x: 0, y: 6 },
-          { x: -3, y: 0 },
-        ])
-        .fill(0xef4444) // Crimson core
-        .stroke({ color: 0xffffff, width: 1.0, alpha: 0.8 });
-      
-      // Evil Glow
-      graphics
-        .circle(0, 0, 4)
-        .fill({ color: 0xef4444, alpha: 0.3 });
-
-      this.renderer.projectileContainer.addChild(graphics);
-
-      p = {
-        x: enemy.x,
-        y: enemy.y,
-        hp: 1,
-        maxHp: 1,
-        graphics,
-        speed: 2.2,
-        dps: angle,
-        radius: 3,
-        rotation: 0,
-        angularVelocity: 0,
-      };
-    } else {
-      p.x = enemy.x;
-      p.y = enemy.y;
-      p.hp = 1;
-      p.maxHp = 1;
-      p.speed = 2.2;
-      p.dps = angle;
-      p.graphics.visible = true;
-      p.graphics.x = enemy.x;
-      p.graphics.y = enemy.y;
+      if (this.enemyProjectiles.length > 0) {
+        p = this.enemyProjectiles.shift()!;
+      } else {
+        const tex = this.renderer.projectileTextures.get('enemy') || this.renderer.projectileTextures.get('standard')!;
+        const sprite = new Sprite(tex);
+        sprite.anchor.set(0.5, 0.5);
+        this.renderer.projectileContainer.addChild(sprite);
+        p = {
+          x: enemy.x,
+          y: enemy.y,
+          hp: 1,
+          maxHp: 1,
+          graphics: sprite,
+          speed: 2.2,
+          dps: angle,
+          radius: 3,
+          rotation: 0,
+          angularVelocity: 0,
+        };
+      }
     }
+
+    p.x = enemy.x;
+    p.y = enemy.y;
+    p.hp = 1;
+    p.maxHp = 1;
+    p.speed = 2.2;
+    p.dps = angle;
+    p.graphics.visible = true;
+    p.graphics.x = enemy.x;
+    p.graphics.y = enemy.y;
 
     this.enemyProjectiles.push(p);
   }
@@ -2620,190 +2587,53 @@ export class Simulation {
 
       let p = this.projectilePool.pop();
       if (!p) {
-        const graphics = new Graphics();
-        this.renderer.projectileContainer.addChild(graphics);
+        if (this.projectiles.length > 0) {
+          p = this.projectiles.shift()!;
+        } else {
+          return;
+        }
+      }
 
-        p = {
-          x: playerX,
-          y: playerY,
-          hp: (protocol === 'singularity_vortex' || hasPiercing) ? 99 : 1,
-          maxHp: (protocol === 'singularity_vortex' || hasPiercing) ? 99 : 1,
-          graphics,
-          speed: protocol === 'gatling' ? 8.5 : (protocol === 'calamity_shell' ? 3.2 : (protocol === 'singularity_vortex' ? 2.4 : 5.5)),
-          dps: finalAngle,
-          radius: protocol === 'calamity_shell' ? 9.0 : (protocol === 'singularity_vortex' ? 12.0 : (protocol === 'gatling' ? 2.0 : 2.5)),
-          rotation: finalAngle + Math.PI / 2,
-          angularVelocity: 0,
-          isPiercing: (protocol === 'singularity_vortex' || hasPiercing),
-          bouncesLeft: 0,
-          isLightning: false,
-          type: protocol,
-          lifeMs: protocol === 'singularity_vortex' ? 3500 : undefined,
-          isDecayBullet: hasDecay,
-          isShrapnelBullet: hasShrapnel && (Math.random() < 0.085),
-          hasPoison,
-        };
+      p.x = playerX;
+      p.y = playerY;
+      p.hp = (protocol === 'singularity_vortex' || hasPiercing) ? 99 : 1;
+      p.maxHp = (protocol === 'singularity_vortex' || hasPiercing) ? 99 : 1;
+      p.speed = protocol === 'gatling' ? 8.5 : (protocol === 'calamity_shell' ? 3.2 : (protocol === 'singularity_vortex' ? 2.4 : 5.5));
+      p.dps = finalAngle;
+      p.radius = protocol === 'calamity_shell' ? 9.0 : (protocol === 'singularity_vortex' ? 12.0 : (protocol === 'gatling' ? 2.0 : 2.5));
+      p.isPiercing = (protocol === 'singularity_vortex' || hasPiercing);
+      p.bouncesLeft = 0;
+      p.isLightning = false;
+      p.type = protocol;
+      p.lifeMs = protocol === 'singularity_vortex' ? 3500 : undefined;
+      p.isDecayBullet = hasDecay;
+      p.isShrapnelBullet = hasShrapnel && (Math.random() < 0.085);
+      p.hasPoison = hasPoison;
+
+      const sprite = p.graphics as unknown as Sprite;
+      const texKey = (protocol === 'gatling' || protocol === 'calamity_shell' || protocol === 'singularity_vortex')
+        ? protocol
+        : 'standard';
+      const tex = this.renderer.projectileTextures.get(texKey) || this.renderer.projectileTextures.get('standard')!;
+      if (sprite.texture !== tex) {
+        sprite.texture = tex;
+      }
+
+      if (hasPoison) {
+        sprite.tint = 0x22c55e;
+      } else if (hasDecay) {
+        sprite.tint = 0xf97316;
+      } else if (hasPiercing) {
+        sprite.tint = 0x22d3ee;
       } else {
-        p.x = playerX;
-        p.y = playerY;
-        p.hp = (protocol === 'singularity_vortex' || hasPiercing) ? 99 : 1;
-        p.maxHp = (protocol === 'singularity_vortex' || hasPiercing) ? 99 : 1;
-        p.speed = protocol === 'gatling' ? 8.5 : (protocol === 'calamity_shell' ? 3.2 : (protocol === 'singularity_vortex' ? 2.4 : 5.5));
-        p.dps = finalAngle;
-        p.radius = protocol === 'calamity_shell' ? 9.0 : (protocol === 'singularity_vortex' ? 12.0 : (protocol === 'gatling' ? 2.0 : 2.5));
-        p.isPiercing = (protocol === 'singularity_vortex' || hasPiercing);
-        p.bouncesLeft = 0;
-        p.isLightning = false;
-        p.type = protocol;
-        p.lifeMs = protocol === 'singularity_vortex' ? 3500 : undefined;
-        p.isDecayBullet = hasDecay;
-        p.isShrapnelBullet = hasShrapnel && (Math.random() < 0.085);
-        p.hasPoison = hasPoison;
-        p.graphics.visible = true;
-        p.graphics.x = playerX;
-        p.graphics.y = playerY;
-        p.graphics.rotation = finalAngle + Math.PI / 2;
+        sprite.tint = 0xffffff;
       }
 
-      // Dynamic Cache-Based Weapon Rendering (to avoid recreating Graphics elements)
-      const pProtocol = p.type || 'standard';
-      
-      // MERGED VISUAL TYPE
-      let visualType = pProtocol;
-      if (p.isDecayBullet) visualType += '_decay';
-      if (p.isShrapnelBullet) visualType += '_shrapnel';
-      if (p.hasPoison) visualType += '_poison';
-
-      if (p.drawnType !== visualType) {
-        p.graphics.clear();
-        p.drawnType = visualType;
-
-        // Base bullet drawing if no specialized overlay dominates
-        const isSpecialized = p.isDecayBullet || p.isShrapnelBullet || p.hasPoison;
-
-        // 1. Draw Poison Spray (Bottom layer)
-        if (p.hasPoison) {
-          for (let i = 0; i < 3; i++) {
-            p.graphics
-              .circle(0, 5 + i * 4, p.radius * (1.2 - i * 0.3))
-              .fill({ color: 0x22c55e, alpha: 0.4 - i * 0.1 });
-          }
-        }
-
-        // 2. Draw Decay Bullet (Orange Skull Aura)
-        if (p.isDecayBullet) {
-          p.graphics
-            .circle(0, 0, p.radius * 2.2)
-            .fill({ color: 0xf97316, alpha: 0.15 })
-            .stroke({ color: 0xf97316, width: 1, alpha: 0.3 });
-          
-          // Simplified Skull
-          p.graphics
-            .circle(0, -2, p.radius * 1.1) // Head
-            .fill(0xf97316)
-            .rect(-p.radius * 0.6, p.radius * 0.2, p.radius * 1.2, p.radius * 0.6) // Jaw
-            .fill(0xf97316);
-          
-          // Small eyes
-          p.graphics
-            .circle(-p.radius * 0.4, -p.radius * 0.4, p.radius * 0.3)
-            .fill(0x000000)
-            .circle(p.radius * 0.4, -p.radius * 0.4, p.radius * 0.3)
-            .fill(0x000000);
-        }
-
-        // 3. Draw Shrapnel Bullet (Sharp Glass)
-        if (p.isShrapnelBullet) {
-          p.graphics
-            .moveTo(0, -p.radius * 2)
-            .lineTo(p.radius * 1.5, p.radius * 1.5)
-            .lineTo(-p.radius * 1.5, p.radius * 1.5)
-            .closePath()
-            .fill({ color: 0xffffff, alpha: 0.9 })
-            .stroke({ color: 0x94a3b8, width: 2 });
-        }
-
-        // 4. Default / Mixed Bullet Core
-        if (!isSpecialized || (p.isDecayBullet && p.isShrapnelBullet)) {
-          if (pProtocol === 'gatling') {
-            // HIGH-VELOCITY NEEDLE (Gatling)
-            p.graphics
-              .moveTo(0, -8)
-              .lineTo(1.5, 2)
-              .lineTo(-1.5, 2)
-              .closePath()
-              .fill(0xfacc15) // Amber Core
-              .stroke({ color: 0xf59e0b, width: 1 });
-            
-            // Kinetic energy trail
-            p.graphics
-              .rect(-0.75, 2, 1.5, 6)
-              .fill({ color: 0xfef3c7, alpha: 0.4 });
-
-          } else if (pProtocol === 'calamity_shell') {
-            // HEAVY EXPLOSIVE CANISTER (Calamity)
-            p.graphics
-              .roundRect(-5, -10, 10, 20, 3)
-              .fill(0x7e22ce) // Purple Heavy Metal
-              .stroke({ color: 0xea580c, width: 2 });
-            
-            // Molten Core Glow
-            p.graphics
-              .circle(0, 0, 4)
-              .fill(0xf97316);
-            
-            // Spiky fins
-            p.graphics
-              .poly([{ x: -5, y: 5 }, { x: -9, y: 12 }, { x: -5, y: 10 }])
-              .fill(0xef4444)
-              .poly([{ x: 5, y: 5 }, { x: 9, y: 12 }, { x: 5, y: 10 }])
-              .fill(0xef4444);
-
-          } else if (pProtocol === 'singularity_vortex') {
-            // EVENT HORIZON (Singularity)
-            // Outer distortion ring
-            p.graphics
-              .circle(0, 0, 14)
-              .fill({ color: 0xec4899, alpha: 0.1 });
-            
-            // Accretion disk
-            p.graphics
-              .circle(0, 0, 11)
-              .stroke({ color: 0xa855f7, width: 3, alpha: 0.8 });
-            
-            // The Singularity (Black Center)
-            p.graphics
-              .circle(0, 0, 7)
-              .fill(0x000000)
-              .stroke({ color: 0xffffff, width: 0.5, alpha: 0.4 });
-
-          } else if (pProtocol === 'calamity_bomblet') {
-            // VOLATILE EMBER (Bomblet)
-            p.graphics
-              .circle(0, 0, 5)
-              .fill(0xea580c)
-              .stroke({ color: 0xfacc15, width: 1.5 });
-            
-            p.graphics
-              .circle(0, 0, 2)
-              .fill(0xffffff);
-
-          } else {
-            // REMASTERED BASIC " - " DASH BULLET (Clean, crisp, sleek laser tracer dash)
-            const dashColor = hasPiercing ? 0x22d3ee : 0x38bdf8;
-
-            // Outer razor-sharp laser dash (8.5px length, 2.0px width)
-            p.graphics
-              .roundRect(-1.0, -4.25, 2.0, 8.5, 0.75)
-              .fill(dashColor);
-
-            // Inner high-visibility core dash line
-            p.graphics
-              .roundRect(-0.5, -3.25, 1.0, 6.5, 0.5)
-              .fill(0xffffff);
-          }
-        }
-      }
+      sprite.visible = true;
+      sprite.alpha = 1.0;
+      sprite.x = playerX;
+      sprite.y = playerY;
+      sprite.rotation = finalAngle + Math.PI / 2;
 
       this.projectiles.push(p);
 
@@ -2850,6 +2680,15 @@ export class Simulation {
     const playerY = GAME_HEIGHT / 2;
     const playerRadius = PHYSICS_CONFIG.playerRadius;
 
+    const playerStats = this.getPlayerCombatStats();
+    // Relative distance threshold dynamically anchored to player attack range + 90px
+    const lodThreshold = (playerStats.attackRadius || 140) + PERFORMANCE_CONFIG.lodRelativeOffset;
+    const lodThresholdSq = lodThreshold * lodThreshold;
+    this.enemyLodFrame = (this.enemyLodFrame + 1) % 6;
+    const qualityTier = this.renderer.getQualityTier();
+    // Quality Tier 2 enforces aggressive 3-frame LOD for distant outer enemies
+    const staggerMod = qualityTier === 2 ? 3 : 2;
+
     // 1. Move toward fortress center / orbit
     for (let i = 0; i < this.enemies.length; i++) {
       const enemy = this.enemies[i];
@@ -2863,7 +2702,27 @@ export class Simulation {
 
       const dx = playerX - enemy.x;
       const dy = playerY - enemy.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const distSq = dx * dx + dy * dy;
+      const isInnerCombat = distSq <= lodThresholdSq;
+
+      // Distant enemy simulation LOD: outside player engagement zone
+      if (!isInnerCombat && !enemy.isAllied && enemy.type !== 'boss') {
+        // Frustum boundary culling for off-screen distant enemies
+        if (enemy.x < -30 || enemy.x > GAME_WIDTH + 30 || enemy.y < -30 || enemy.y > GAME_HEIGHT + 30) {
+          enemy.graphics.visible = false;
+        } else {
+          enemy.graphics.visible = true;
+        }
+
+        if ((i + this.enemyLodFrame) % staggerMod !== 0) {
+          continue; // Skip simulation update this frame
+        }
+      } else {
+        enemy.graphics.visible = true;
+      }
+
+      const stepDelta = (!isInnerCombat && !enemy.isAllied && enemy.type !== 'boss') ? delta * staggerMod : delta;
+      const dist = Math.sqrt(distSq);
 
       if (enemy.isAllied) {
         // TURNED FRIENDLY MINION AI: hunt closest non-allied enemy & decay lifetime (max 15s)
@@ -2952,8 +2811,8 @@ export class Simulation {
         } else {
           // Approach towards standoff orbit distance
           if (dist > myOrbitRadius) {
-            enemy.x += (dx / dist) * (enemy.speed || 1.1) * delta;
-            enemy.y += (dy / dist) * (enemy.speed || 1.1) * delta;
+            enemy.x += (dx / dist) * (enemy.speed || 1.1) * stepDelta;
+            enemy.y += (dy / dist) * (enemy.speed || 1.1) * stepDelta;
             enemy.rotation = Math.atan2(-dy, -dx);
           }
         }
@@ -2970,29 +2829,31 @@ export class Simulation {
           }
         }
         if (dist > playerRadius + enemy.radius) {
-          enemy.x += (dx / dist) * (enemy.speed || 1.0) * delta;
-          enemy.y += (dy / dist) * (enemy.speed || 1.0) * delta;
+          enemy.x += (dx / dist) * (enemy.speed || 1.0) * stepDelta;
+          enemy.y += (dy / dist) * (enemy.speed || 1.0) * stepDelta;
         }
       } else if (enemy.type === 'emerald_diamond') {
         // Emerald Diamond Rusher: Moves at high speed in a sine wave zig-zag
         if (dist > playerRadius + enemy.radius) {
           const perpX = -dy / dist;
           const perpY = dx / dist;
-          const zigzag = Math.sin(currentTime * 0.009 + enemy.x * 0.1) * 2.2 * delta;
-          enemy.x += (dx / dist) * (enemy.speed || 2.2) * delta + perpX * zigzag;
-          enemy.y += (dy / dist) * (enemy.speed || 2.2) * delta + perpY * zigzag;
+          const zigzag = Math.sin(currentTime * 0.009 + enemy.x * 0.1) * 2.2 * stepDelta;
+          enemy.x += (dx / dist) * (enemy.speed || 2.2) * stepDelta + perpX * zigzag;
+          enemy.y += (dy / dist) * (enemy.speed || 2.2) * stepDelta + perpY * zigzag;
         }
       } else if (enemy.type === 'gold_hexagon') {
         // Bastion Commander: Protects nearby shape allies within 120px
         if (dist > playerRadius + enemy.radius) {
-          enemy.x += (dx / dist) * (enemy.speed || 0.7) * delta;
-          enemy.y += (dy / dist) * (enemy.speed || 0.7) * delta;
+          enemy.x += (dx / dist) * (enemy.speed || 0.7) * stepDelta;
+          enemy.y += (dy / dist) * (enemy.speed || 0.7) * stepDelta;
         }
-        this.spatialGrid.queryRadius(enemy.x, enemy.y, 120, (near) => {
-          if (near !== enemy && !near.isAllied && near.hp > 0) {
-            near.hasShieldAura = true;
-          }
-        });
+        if (isInnerCombat) {
+          this.spatialGrid.queryRadius(enemy.x, enemy.y, 120, (near) => {
+            if (near !== enemy && !near.isAllied && near.hp > 0) {
+              near.hasShieldAura = true;
+            }
+          });
+        }
       } else if (enemy.type === 'phase_shifter') {
         // Quantum Phase Shifter: Periodically enters intangibility phase every 3.5s
         enemy.phaseTimerMs = (enemy.phaseTimerMs ?? 3500) - delta * 16.666;
@@ -3010,22 +2871,28 @@ export class Simulation {
           }
         }
         if (dist > playerRadius + enemy.radius) {
-          enemy.x += (dx / dist) * (enemy.speed || 0.95) * delta;
-          enemy.y += (dy / dist) * (enemy.speed || 0.95) * delta;
+          enemy.x += (dx / dist) * (enemy.speed || 0.95) * stepDelta;
+          enemy.y += (dy / dist) * (enemy.speed || 0.95) * stepDelta;
         }
       } else {
         if (dist > playerRadius + enemy.radius) {
-          enemy.x += (dx / dist) * (enemy.speed || 1) * delta;
-          enemy.y += (dy / dist) * (enemy.speed || 1) * delta;
+          enemy.x += (dx / dist) * (enemy.speed || 1) * stepDelta;
+          enemy.y += (dy / dist) * (enemy.speed || 1) * stepDelta;
         }
       }
     }
 
     // 2. High-performance Separation & rotation
     const enemyCount = this.enemies.length;
+    const maxNeighbors = enemyCount > 500 ? 2 : (enemyCount > 250 ? 4 : 6);
     for (let i = 0; i < enemyCount; i++) {
       const eA = this.enemies[i];
       if (eA.isOrbiting) continue;
+      // Skip mutual repulsion for distant enemies if dense swarm
+      if (enemyCount > 250) {
+        const dPlayerSq = (eA.x - playerX) * (eA.x - playerX) + (eA.y - playerY) * (eA.y - playerY);
+        if (dPlayerSq > lodThresholdSq) continue;
+      }
       let neighborsChecked = 0;
       for (let j = i + 1; j < enemyCount; j++) {
         const eB = this.enemies[j];
@@ -3049,7 +2916,7 @@ export class Simulation {
           eB.y += ny * overlap * 0.5;
 
           neighborsChecked++;
-          if (neighborsChecked >= 6) break; // Capped per-frame impulse resolution for smooth 120+ FPS
+          if (neighborsChecked >= maxNeighbors) break; // Capped per-frame impulse resolution for smooth 120+ FPS
         }
       }
     }
@@ -3627,42 +3494,33 @@ export class Simulation {
             const bombletAngle = (k * (Math.PI * 2) / 5) + Math.random() * 0.4;
             let bp = this.projectilePool.pop();
             if (!bp) {
-              const bGraphics = new Graphics();
-              this.renderer.projectileContainer.addChild(bGraphics);
-              bp = {
-                x: hitX,
-                y: hitY,
-                hp: 1,
-                maxHp: 1,
-                graphics: bGraphics,
-                radius: 3.5,
-                rotation: bombletAngle + Math.PI / 2,
-                angularVelocity: 0,
-                isPiercing: false,
-                bouncesLeft: 0,
-                isLightning: true,
-                type: 'calamity_bomblet',
-                drawnType: 'calamity_bomblet',
-              };
-            } else {
-              bp.x = hitX;
-              bp.y = hitY;
-              bp.hp = 1;
-              bp.maxHp = 1;
-              bp.radius = 3.5;
-              bp.isPiercing = false;
-              bp.bouncesLeft = 0;
-              bp.type = 'calamity_bomblet';
-              bp.drawnType = 'calamity_bomblet';
-              bp.graphics.visible = true;
-              bp.graphics.x = hitX;
-              bp.graphics.y = hitY;
-              bp.graphics.rotation = bombletAngle + Math.PI / 2;
+              if (this.projectiles.length > 0) {
+                bp = this.projectiles.shift()!;
+              } else {
+                continue;
+              }
             }
+
+            bp.x = hitX;
+            bp.y = hitY;
+            bp.hp = 1;
+            bp.maxHp = 1;
+            bp.radius = 3.5;
+            bp.isPiercing = false;
+            bp.bouncesLeft = 0;
+            bp.type = 'calamity_bomblet';
             bp.speed = 5.0 + Math.random() * 1.5;
             bp.dps = bombletAngle;
-            bp.graphics.clear();
-            bp.graphics.circle(0, 0, 5).fill(0xea580c).stroke({ color: 0xfacc15, width: 1.0 });
+
+            const bSprite = bp.graphics as unknown as Sprite;
+            const bTex = this.renderer.projectileTextures.get('calamity_bomblet') || this.renderer.projectileTextures.get('standard')!;
+            bSprite.texture = bTex;
+            bSprite.tint = 0xffffff;
+            bSprite.visible = true;
+            bSprite.alpha = 1.0;
+            bSprite.x = hitX;
+            bSprite.y = hitY;
+            bSprite.rotation = bombletAngle + Math.PI / 2;
 
             this.projectiles.push(bp);
           }
@@ -4392,6 +4250,31 @@ export class Simulation {
 
   public getProjectiles(): Entity[] {
     return this.projectiles;
+  }
+
+  public getActiveExplosionsCount(): number {
+    return this.activeExplosions.length;
+  }
+
+  public getActiveRocketsCount(): number {
+    return this.activeRockets.length;
+  }
+
+  public spawnTestHorde(count: number = 400) {
+    const types = [
+      'red_square', 'orange_triangle', 'big_square', 'circle',
+      'purple_pentagon', 'gold_hexagon', 'emerald_diamond',
+      'crimson_octagon', 'enraged_trapezium', 'disruptor_emp',
+      'reflector_prism', 'splitter_cluster', 'phase_shifter',
+    ];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 280 + Math.random() * 180;
+      const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
+      const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
+      const type = types[i % types.length];
+      this.createEnemyEntity(x, y, type, this.state.wave, this.state.tier);
+    }
   }
 
   public isEnemyInRange(enemy: { x: number; y: number }, radius: number = this.state.attackRadius || ATTACK_RADIUS_CONFIG.default): boolean {

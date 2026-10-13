@@ -128,6 +128,8 @@ export function getDefaultProgression(): SavedProgression {
       soundMuted: false,
       bgmMuted: false,
       highPerformanceMode: false,
+      adaptivePerformanceMode: true,
+      showPerformanceHud: false,
       showFpsCounter: false,
       autoLevelUpCards: false,
     },

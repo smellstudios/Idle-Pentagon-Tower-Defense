@@ -1,112 +1,140 @@
-# Remastered In-Game Popups & Combat Readability Blueprint
+# High-Density 60 FPS Scaling Blueprint (400–1,200+ Enemies & Dense Projectiles)
 
-A complete visual remaster and performance overhaul for in-game floating popups (Currency, Cosmic Shards, Status Ailments, and Damage Numbers), upgrading them to high-contrast minimalist typography with extended 1.6–2.2 second readability curves, smart multi-hit stacking, and zero-allocation WebGL rendering.
-
----
-
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> The following design decisions were confirmed during Phase 1 interactive clarification:
-> - **Extended Visibility (1.6s to 2.2s):** Currency gains and status ailments will linger with a graceful glide and decelerated float, resolving the issue where popups vanished prematurely in under 0.3s.
-> - **Minimalist Crisp Typography:** Popups will use sharp, unboxed high-contrast typography with clean dual-tone strokes and drop-shadows rather than clunky, distracting background containers.
-> - **Smart Stacked Multipliers:** Repeated status triggers (e.g., Poison ticks, Decay stacks, Bleed, Phase shifts) will dynamically group into clean stacked badges with `(x2)`, `(x5)` hit multipliers to keep combat clear and free of screen clutter.
+A production-grade architectural specification to sustain **60 FPS on mid-range mobile browsers** (Android 2021–2025 and iOS WebKit) under **400–1,200+ active enemies** and **150–400+ simultaneous projectiles** in PixiJS v8 + React 19 + TypeScript + Zustand.
 
 ---
 
-## 1. Overview & Core Concept
+## 1. Non-Negotiable Core Principle: 100% Visual Identity Preservation
 
-- **What It Delivers:**
-  - Completely re-architected floating popup system in `src/game/popups.ts` and `Simulation.ts`.
-  - Removes premature culling and sudden 300ms fade-outs, replacing them with a satisfying 1,800ms lifecycle (fast initial pop $\rightarrow$ smooth buoyant upward glide $\rightarrow$ gentle linear fade in the final 25% of life).
-  - Modernizes visual aesthetics with crisp typography, razor-sharp dark contrast strokes, and distinct color-coded domain themes (Emerald for Cash, Amethyst for Shards, Ruby for Player Damage, Neon Amber for Crits, and tailored ailment palettes).
-  - Implements high-performance spatial aggregation so high-frequency combat effects (rapid fire, chains, poison miasma) merge smoothly with animated hit-counter pulses instead of spamming 50 overlapping popups.
-
-- **Primary Player Experience Value:**
-  - Clear, readable rewards whenever shapes are destroyed without having to squint or pause.
-  - Zero frame drops or main-thread hitching even when dozens of entities are eliminated simultaneously.
+The transition from `Graphics` to `Sprite` is **strictly an under-the-hood rendering optimization**.
+- **Zero Visual Degradation or Simplification:** Every single enemy shape, polygon vertex, stroke weight, inner eye, crown orb, and contour line is preserved with 100% visual parity.
+- The procedural texture generator draws the **exact** mathematical geometry currently used in `Simulation.ts` and `Renderer.ts`, baked once into ultra-crisp GPU textures.
+- The player will experience zero visual downgrade or altered aesthetic; only a dramatic leap in rendering efficiency and frame-rate stability.
 
 ---
 
-## 2. User Experience & Visual Design
+## 2. Refined Architecture Details
 
-### Visual Identity & Aesthetic Rules
-- **Typography:** JetBrains / Space Mono uppercase bold styling with subpixel integer rounding for razor-sharp legibility on high-DPI canvas viewports.
-- **Stroke & Contrast Math:** Outer contour stroke width of 2.5px to 3.0px using deep midnight contrast colors (`#000000`, `#064e3b`, `#450a0a`) guaranteeing 100% legibility against bright lasers, particle explosions, and dark space backgrounds alike.
-- **Palette Mapping:**
-  - **Cash ($ / Stardust):** Emerald Green (`#34d399` text / `#064e3b` outline).
-  - **Cosmic Shards (💠):** Electric Amethyst (`#c084fc` text / `#3b0764` outline).
-  - **Dual Currency Merge:** Dual-tone gradient gold (`#facc15` text / `#451a03` outline).
-  - **Player Contact Damage:** High-voltage Danger Red (`#ef4444` text / `#450a0a` outline).
-  - **Status Ailments:**
-    - Poison / Miasma: Biohazard Lime (`#22c55e`).
-    - Decaying Plague: Toxic Rust (`#f97316`).
-    - Shrapnel Bleed: Crimson Gore (`#f43f5e`).
-    - EMP / Shock / Deflect: Cyber Cyan (`#06b6d4`).
-    - Phasing / Void: Cosmic Purple (`#a855f7`).
+### A. Enemy Procedural Texture Atlas (`EnemyTextureAtlas`)
+- **Consistent Texture Resolution:**
+  - Standard entities: Pre-rendered at `128×128` (with crisp sub-pixel anti-aliasing) to maintain razor-sharp contours across high-DPI mobile screens.
+  - Boss entities: Pre-rendered at `128×128` to cleanly accommodate the 10-pointed star, outer golden crown ring, and 3 satellite armor nodes.
+- **Pure White Fill & Contour Pipeline:**
+  - All textures are generated with pure white fills (`0xffffff`) and crisp high-contrast white strokes.
+  - Colors are applied at runtime exclusively via WebGL `sprite.tint`:
+    - Base enemy colors (`typeColors[type]`)
+    - Golden variants (`0xfacc15`)
+    - Poisoned state (`0x22c55e`)
+    - Freeze / Stun state (`0x38bdf8`)
+    - Void / Phase state (`0xc084fc`)
+  - This allows a single shared GPU texture per enemy type while supporting unlimited dynamic status effects and color variants.
+- **Preserved `enemyPools` Structure:**
+  - The existing `enemyPools: Map<string, Entity[]>` remains completely intact without redesign.
+  - Only the visual representation swaps from `enemy.graphics: Graphics` to `enemy.sprite: Sprite`, updating `.sprite.tint`, `.sprite.visible`, `.sprite.x`, `.sprite.y`, and `.sprite.rotation`.
+  - Zero changes to spawn curves, drops, wave logic, or pool lifecycles.
 
-### Motion Choreography (1.8s Total Curve)
-```
-Lifecycle Timeline (1800ms)
-0ms ───[ 140ms Pop & Elastic Settle ]───> 140ms
-140ms ─[ 1000ms Buoyant Deceleration Glide (Alpha 1.0) ]─> 1140ms
-1140ms [ 660ms Smooth Ease-Out Fade (Alpha 1.0 -> 0.0) ]─> 1800ms (Recycled to Pool)
-```
+### B. Relative Simulation LOD (`playerAttackRadius + 90px`)
+- **Dynamic Relative Distance Boundary:**
+  $$\text{LOD Distance} = \text{playerAttackRadius} + 90\text{px}$$
+  - Adapts dynamically as the player purchases Attack Range upgrades.
+- **Inner Combat Zone (Full 60 FPS):**
+  - Any enemy within `playerAttackRadius + 90px` updates at full 60 FPS with immediate homing physics, obstacle avoidance, full ailment evaluation, and rotation.
+  - Ensures responsive, instant reaction as enemies enter weapon engagement range.
+- **Outer March Zone (Staggered LOD):**
+  - Distant enemies marching inward from the screen borders (beyond `attackRadius + 90px`) update on alternating frames (even indices on frame $A$, odd indices on frame $B$) with a normalized double-delta step ($2 \times \Delta$).
+  - Off-screen enemies (`x < -30`, `x > GAME_WIDTH + 30`, `y < -30`, `y > GAME_HEIGHT + 30`) skip matrix updates and set `sprite.visible = false`.
 
-1. **Initial Impulse (0ms – 140ms):** Springs upward with a scale punch ($1.0 \rightarrow 1.25 \rightarrow 1.0$) with zero initial jump so the eye immediately registers the number.
-2. **Sustained Readability Phase (140ms – 1140ms):** Glides upward with a slow cubic ease-out float while maintaining **100% full opacity**, ensuring the player has over a full second of clear reading time.
-3. **Gentle Fadeout (1140ms – 1800ms):** Smoothly ramps opacity to 0 while gently completing its upward drift, recycling the sprite back into the pre-warmed object pool.
+### C. Fully Pre-Warmed 400-Sprite Projectile Pool
+- **Strict Pre-Allocation at Boot (Zero Runtime Growth):**
+  - Exactly 400 `Sprite` instances are pre-allocated during `Renderer.init()` and attached to `renderer.projectileContainer`.
+  - No runtime allocations, no dynamic resizing, and no garbage-collector spikes during bullet-hell barrages.
+  - Fast index-stack / free-list pointer for $O(1)$ allocation and recycling.
+
+### D. Multi-Tier Adaptive Governor
+- **Rolling Frame-Time Window:**
+  - Exponential moving average over 60 frames in `GameManager`.
+  - Downgrade trigger: Average frame time $> 18.5\text{ms}$ (< 54 FPS) sustained for 2.0 seconds.
+  - Recovery trigger: Average frame time $< 15.0\text{ms}$ (> 66 FPS) sustained for 8.0 seconds.
+- **Tier Levels & LOD Coupling:**
+  - **Tier 0 (Standard High Fidelity):** Full DPR (up to 2.0), outer enemies at 30 FPS LOD, standard VFX caps.
+  - **Tier 1 (Performance):** 1.0 DPR, outer enemies at 30 FPS LOD, tightened VFX concurrency caps.
+  - **Tier 2 (Ultra High Density):** 1.0 DPR, aggressive 3-frame LOD for distant outer enemies (20 FPS outer march), strict VFX caps (max 10 explosions, max 12 rockets, simplified particle bursts).
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 3. Sequential 6-Stage Implementation Plan
 
-| Decision | Chosen Approach | Rationale | Alternatives Considered |
-|---|---|---|---|
-| **Visual Container** | Minimalist unboxed typography with high-contrast outlines | Keeps the game canvas clean, airy, and arcade-authentic; eliminates clunky dark pill blocks | Rounded container boxes (too visually heavy during intense waves) |
-| **Duration Lifecycle** | 1,800ms (with full opacity for 1,140ms) | Solves the user's issue where popups vanished in 0.2s–0.3s; gives ample reading time | 3,000ms (causes clutter during high-density waves) |
-| **Status Stacking** | Smart spatial aggregation with `(xN)` multipliers | Merges repeated triggers on nearby enemies into a single punching status tag | Individual popups for each enemy (spams screen and drops FPS) |
-| **Object Pooling** | Fixed pre-allocated `PopupItem` pool (120 units) | Zero garbage collection allocations during combat frames | Allocating `new Text()` per spawn (causes GC hitching) |
+Each stage is completely modular, allowing verification after each phase:
+
+### Stage 1: Enemy Rendering Architecture (Texture Atlas & Pooled Sprites)
+- **Files:** `src/game/constants.ts`, `src/game/Renderer.ts`, `src/game/Simulation.ts`
+- **Actions:**
+  1. Define `EnemyTextureAtlas` in `Renderer.ts`. During `renderer.init()`, generate 128×128 pure-white base textures for all 15 enemy types:
+     - `red_square`, `orange_triangle`, `big_square`, `circle`
+     - `purple_pentagon` (5-pointed star + pupil)
+     - `gold_hexagon` (dual tech hexagon)
+     - `emerald_diamond` (dual shard geometry)
+     - `crimson_octagon` (armored octagonal plate)
+     - `enraged_trapezium` (armored wedge)
+     - `disruptor_emp` (EMP ring + circuit notches)
+     - `reflector_prism` (faceted prism)
+     - `splitter_cluster` (triad cluster)
+     - `cluster_mini` (mini emerald shard)
+     - `phase_shifter` (9-pointed quantum star + aperture)
+     - `boss` (10-pointed star + crown ring + 3 satellite orbs)
+  2. In `Simulation.ts`, update `Entity` interface to use `sprite: Sprite`.
+  3. Keep existing `enemyPools` structure intact, only updating pooled object visual instantiation from `Graphics` to `Sprite`.
+  4. Ensure sprite anchoring (`anchor.set(0.5, 0.5)`) and color tinting match previous appearance pixel-for-pixel.
+
+### Stage 2: Simulation LOD & Relative Distance Threshold
+- **Files:** `src/game/Simulation.ts`, `src/game/constants.ts`
+- **Actions:**
+  1. Add relative threshold calculation: `const lodThreshold = attackRadius + 90;`.
+  2. Implement alternating-frame update loop for enemies where distance from player $> \text{lodThreshold}$.
+  3. Add viewport boundary culling (`sprite.visible = false`) for off-screen enemies.
+  4. Cap neighbor separation checks to a maximum of 4 neighbors per enemy when total count $> 250$.
+
+### Stage 3: Fully Pre-Warmed 400-Sprite Projectile Pool
+- **Files:** `src/game/Renderer.ts`, `src/game/Simulation.ts`
+- **Actions:**
+  1. Pre-bake laser bolt, bullet, plasma sphere, and enemy projectile textures.
+  2. Fully pre-warm 400 `Sprite` instances in `renderer.projectileContainer` on boot (strictly no runtime growth).
+  3. Convert player firing routines (`standard`, `gatling`, `plasma_beam`, `calamity_shell`, `singularity_vortex`, `octo_strike`, `double_shot`) and enemy shooting to acquire from the 400-sprite pre-warmed pool.
+  4. Enforce $O(1)$ recycling back into the free stack when projectiles expire or exit boundaries.
+
+### Stage 4: Special Effects Concurrency Caps & Quality Tiers
+- **Files:** `src/game/Simulation.ts`, `src/game/constants.ts`
+- **Actions:**
+  1. Implement hard concurrency limits:
+     - Max active explosions: 16 (Tier 2: 10)
+     - Max active rockets: 24 (Tier 2: 14)
+     - Max active lightning arcs: 12 (Tier 2: 8)
+     - Max active mortar reticles: 4 (Tier 2: 3)
+  2. Recycle or discard lowest-priority excess effects when thresholds are reached.
+
+### Stage 5: Adaptive Frame-Time Governor & Settings UI
+- **Files:** `src/game/GameManager.ts`, `src/types.ts`, `src/components/SettingsModal.tsx`
+- **Actions:**
+  1. Implement rolling EMA frame-time monitor in `GameManager.loop` with 18.5ms downgrade and 15.0ms recovery thresholds.
+  2. Couple Tier 2 quality level to enhanced distant enemy LOD staggering (3-frame stagger).
+  3. Expose **High-Density Performance Mode**, **Adaptive Scaling Toggle**, and **Debug Performance HUD** in `SettingsModal.tsx` under the **Performance** tab.
+
+### Stage 6: Polish, Tab Sleep & Verification
+- **Files:** `src/game/GameManager.ts`, `src/components/GameCanvas.tsx`
+- **Actions:**
+  1. Add `visibilitychange` listener to sleep simulation and audio when tab is backgrounded.
+  2. Add optional debug HUD badge displaying live FPS, Active Enemies, Projectiles, and VFX count.
+  3. Validate build via `compile_applet` and `lint_applet`.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+## 4. Mobile Testing & Benchmarking Plan
 
-### System Architecture Diagram
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       Simulation.ts                         │
-│  (Enemy Kill / Ailment Ticks / Contact Damage / Life Steal) │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      PopupManager                           │
-│  - Spatial Proximity Query (45px radius search)             │
-│  - Multi-Hit Aggregation & Stack Multiplier (x2, x3...)     │
-│  - Pre-warmed Object Pool (120 items, zero runtime alloc)   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   PixiJS WebGL Render Tree                  │
-│  - Text Sprite + High-Contrast Contrast Stroke              │
-│  - 60 FPS Continuous Coordinate & Alpha Interpolation       │
-│  - GPU-snapped text positions (roundPixels: true)           │
-└──────────────────────────────┴──────────────────────────────┘
-```
-
-### Implementation Steps
-1. **Extend Constants (`src/game/constants.ts`):**
-   - Update `POPUP_CONFIG.cashDurationMs` from 850ms to 1800ms.
-   - Update `POPUP_CONFIG.damageDurationMs` from 600ms to 1400ms.
-   - Update status text default duration from 850ms to 1800ms.
-2. **Remaster `PopupItem` in `src/game/popups.ts`:**
-   - Redesign `refreshVisuals()`: Remove dark pill boxes; implement crisp high-contrast text rendering with dynamic theme styling and crisp outlines.
-   - Update `update(deltaMs)`: Re-tune the opacity curve so popups maintain 100% opacity for the first 65% of their life before smoothly fading out.
-   - Upgrade `aggregateText()` and `aggregateDamage()`: Add clean multiplier formatting (`+12 (x3)`) with an elastic scale pop that refreshes duration without resetting spatial momentum.
-3. **Optimize `PopupManager` Spawning & Merging:**
-   - Increase pool size from 80 to 120 pre-allocated items to handle extended lingering without pool exhaustion.
-   - Prevent premature clearing in `flushPendingCurrency()` so active on-screen popups complete their smooth animation.
-4. **Verification & Build Validation:**
-   - Execute `compile_applet` and `lint_applet` to verify zero compile or type errors.
+1. **Synthetic Spawn Stress Test:**
+   - Add testing method `gameManager.spawnTestHorde(count: number)` to test 400, 800, and 1,200 simultaneous enemies on demand.
+2. **Visual Parity Audit:**
+   - Side-by-side verification of all 15 enemy shapes and boss variants to confirm identical geometry, strokes, and rotation.
+3. **Frame-Rate Validation:**
+   - Sustained 60 FPS ($\le 16.6\text{ms}$) on mobile browsers at 500+ active enemies and 200+ projectiles.
+4. **Zero-Allocation Verification:**
+   - Flat memory footprint over 5-minute stress sessions with zero garbage-collection spikes.

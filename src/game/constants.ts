@@ -674,6 +674,57 @@ export const PHYSICS_CONFIG = {
   playerAngularDamping: 0.90,
 };
 
+export const ENEMY_TYPE_COLORS: Record<string, number> = {
+  red_square: 0xef4444,
+  orange_triangle: 0xf97316,
+  big_square: 0x3b82f6,
+  circle: 0x10b981,
+  purple_pentagon: 0xa855f7,
+  gold_hexagon: 0xeab308,
+  emerald_diamond: 0x10b981,
+  crimson_octagon: 0xdc2626,
+  enraged_trapezium: 0xf97316,
+  disruptor_emp: 0x06b6d4,
+  reflector_prism: 0x38bdf8,
+  splitter_cluster: 0x10b981,
+  cluster_mini: 0x34d399,
+  phase_shifter: 0x8b5cf6,
+  boss: 0xa855f7,
+};
+
+export const PERFORMANCE_CONFIG = {
+  // Distance beyond playerAttackRadius for full 60 FPS inner combat zone
+  lodRelativeOffset: 90,
+  // Rolling EMA frame-time thresholds (ms)
+  downgradeFrameTimeMs: 18.5, // > 18.5ms (< 54 FPS)
+  recoveryFrameTimeMs: 15.0,  // < 15.0ms (> 66 FPS)
+  downgradeSustainMs: 2000,
+  recoverySustainMs: 8000,
+  // Projectile Pool Size
+  projectilePoolCapacity: 400,
+  // VFX caps per quality tier
+  vfxCaps: {
+    tier0: {
+      maxExplosions: 16,
+      maxRockets: 24,
+      maxLightningArcs: 12,
+      maxMortarStrikes: 4,
+    },
+    tier1: {
+      maxExplosions: 12,
+      maxRockets: 18,
+      maxLightningArcs: 10,
+      maxMortarStrikes: 3,
+    },
+    tier2: {
+      maxExplosions: 8,
+      maxRockets: 12,
+      maxLightningArcs: 6,
+      maxMortarStrikes: 2,
+    },
+  },
+};
+
 /**
  * IN-RUN TOWER UPGRADES (Purchased with In-Run CASH ($), resets upon new run)
  */

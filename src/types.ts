@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Graphics } from 'pixi.js';
+import { Graphics, Sprite } from 'pixi.js';
 
 export interface Entity {
   x: number;
   y: number;
   hp: number;
   maxHp: number;
-  graphics: Graphics;
+  graphics: Graphics | Sprite;
   type?: string;
   speed?: number;
   dps?: number;
@@ -255,6 +255,8 @@ export interface GameSettings {
   bgmMuted: boolean;
   useLegacyCurrencyFormat?: boolean;
   highPerformanceMode?: boolean;
+  adaptivePerformanceMode?: boolean;
+  showPerformanceHud?: boolean;
   showFpsCounter?: boolean;
   autoLevelUpCards?: boolean;
 }

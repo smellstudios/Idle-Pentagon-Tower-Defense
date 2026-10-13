@@ -442,7 +442,7 @@ export default function App() {
 
       {/* Main Canvas Stage */}
       <main className="absolute inset-0 flex flex-col items-center justify-center">
-        <GameCanvas gameManager={gameManagerRef.current} />
+        <GameCanvas gameManager={gameManagerRef.current} showHud={gameState.settings?.showPerformanceHud} />
       </main>
 
       {/* In-Run Upgrade Panel (Cash Upgrades) */}
